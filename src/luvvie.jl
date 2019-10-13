@@ -2,13 +2,12 @@ module luvvie
 
 import Threads.@spawn
 
-using Tranducers
-
 export Id, Actor, Stage, enter!, say, hear
 
 imap(f) = x -> Iterators.Generator(f, itr)
 ifilter(f) = x -> Iterators.filter(f, x)
 
+# import List
 include("double_linked_list.jl")
 
 struct Id{A <: Actor}
