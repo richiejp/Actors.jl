@@ -2,3 +2,12 @@ name = "luvvie"
 uuid = "9a689b2b-e193-422e-94f3-388711890a53"
 authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
 version = "0.1.0"
+
+[compat]
+julia = "1.3"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

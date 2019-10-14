@@ -1,56 +1,51 @@
 using Test
 using luvvie
 
-abstract type Luvvie end
-
-struct Duck <: Luvvie
-    name::String
-    pop::Int
-end
-
-struct Director <: Luvvie
+struct Duck
     name::String
     pop::Int
 end
 
 struct WhoLovesMe
-    sender::Id
+    re::Id
 end
 
 struct HowPopularAreYou
-    sender::Id
+    re::Id
 end
 
-hear(scene::Scene, msg::HowPopularAreYou) = with_state_copy(scene) do state
-    next(scene)
-    say(scene, msg.sender, state.pop)
-end
+luvvie.hear(s::Scene{Duck}, msg::HowPopularAreYou) =
+    say(s, msg.re, my(s).pop)
 
-hear(scene::Scene, cast::Id{Cast}) = say(scene, cast, WhoLovesMe(scene.target))
-
-function hear(scene::Scene, msg::WhoLovesMe)
-    other_pop = ask(scene, msg.sender, Val(:how_popular_are_you))
-    my_pop = take_state(scene).pop
-    next(scene)
+function luvvie.hear(s::Scene{Duck}, msg::WhoLovesMe)
+    other_pop = ask(s, msg.re, HowPopularAreYou(me(s)))
+    my_pop = my(s).pop
 
     if my_pop <= other_pop
-        say(scene, sender, Val(:i_love_you))
+        say(s, msg.re, Val(:i_love_you))
     end
 end
 
-hear(scene::Scene, ::Val{:i_love_you}) = update_state(scene) do state
-    Duck(state.name, state.pop + 1)
+function luvvie.hear(s::Scene{Duck}, ::Val{:i_love_you})
+    my(s).pop += 1
+
+    say(stage(s), TheEnd!())
 end
 
-stage = Stage()
+luvvie.hear(s::Scene{Stage}, msg::Entered!) =
+    roar(s, WhoLovesMe(msg.who))
 
-brian = enter!(stage, () -> Duck("Brian", 1))
-nigel = enter!(state, () -> Duck("Nigel", 0))
+function luvvie.hear(s::Scene{Stage}, ::Genesis!)
+    st = stage(s)
 
-say(stage, nigel, WhoLovesMe(brian))
+    say(s, st, Enter!(Duck("Nigel", 0), st))
+    say(s, st, Enter!(Duck("Brian", 1), st))
+end
 
-sleep(1)
+st = genesis()
 
-@test brian.ref[].pop == 2
+play!(st)
+
+@test st.ref[].state.actors[1].ref[].state.pop == 2
 
 
