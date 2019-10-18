@@ -1,22 +1,31 @@
+mutable struct ListImpl{C}
+    len::UInt
+    first::Union{C, Nothing}
+    last::Union{C, Nothing}
+end
+
 mutable struct Cons{T}
-    list::List{T}
+    list::ListImpl{Cons{T}}
     next::Union{Cons{T}, Nothing}
     data::T
     prev::Union{Cons{T}, Nothing}
 end
 
-mutable struct List{T}
-    len::UInt
-    first::Union{Cons{T}, Nothing}
-    last::Union{Cons{T}, Nothing}
+ListImpl{C}() where {C<:Cons} = ListImpl{C}(0, nothing, nothing)
+
+const List{T} = ListImpl{Cons{T}}
+
+Base.:(==)(u::List{T}, v::List{T}) where T = all(zip(u, v)) do x, y
+    x == y
 end
 
-List() = List(0, nothing, nothing)
+Base.IteratorSize(::Type{List{T}}) where T = Base.SizeUnknown()
+Base.eltype(::Type{List{T}}) where T = T
 
 function Base.push!(list::List{T}, data::T) where T
     cons = Cons(list, nothing, data, list.last)
 
-    if list.len === 0
+    if list.len == 0
         list.first = cons
     else
         list.last.next = cons
@@ -50,9 +59,6 @@ function Base.delete!(cons::Cons)
 end
 
 Base.iterate(list::List{T}) where T = iterate(list, list.first)
-Base.iterate(list::List{T}, ::Nothing) = nothing
-Base.iterate(list::List{T}, cons::Cons{T}) = if cons.next === nothing
-    nothing
-else
-    (cons.next, cons.next)
-end
+Base.iterate(list::List{T}, ::Nothing) where T = nothing
+Base.iterate(list::List{T}, cons::Union{Cons{T}, Nothing}) where T =
+    isnothing(cons) ? nothing : (cons, cons.next)
