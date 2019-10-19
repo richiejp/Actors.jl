@@ -1,6 +1,31 @@
 using Test
 using luvvie
 
+@testset "Hello, World!" begin
+    test_chnl = Channel(1)
+
+    "Our Actor"
+    struct Julia end
+
+    "Our Message"
+    struct HelloWorld! end
+
+    luvvie.hear(s::Scene{A}, ::HelloWorld!) where A =
+        put!(test_chnl, "Hello, World! I am $(A)!")
+
+    function luvvie.hear(s::Scene{Stage}, ::Genesis!)
+        julia = enter!(s, Julia())
+
+        say(s, julia, HelloWorld!())
+
+        leave!(s)
+    end
+
+    play!(Stage())
+    @test take!(test_chnl) == "Hello, World! I am Julia!"
+    close(test_chnl)
+end
+
 # Popularity begets popularity
 #
 # Script:
