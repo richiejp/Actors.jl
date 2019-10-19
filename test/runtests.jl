@@ -1,5 +1,5 @@
 using Test
-using luvvie
+using luvvy
 
 @testset "Hello, World!" begin
     test_chnl = Channel(1)
@@ -10,10 +10,10 @@ using luvvie
     "Our Message"
     struct HelloWorld! end
 
-    luvvie.hear(s::Scene{A}, ::HelloWorld!) where A =
+    luvvy.hear(s::Scene{A}, ::HelloWorld!) where A =
         put!(test_chnl, "Hello, World! I am $(A)!")
 
-    function luvvie.hear(s::Scene{Stage}, ::Genesis!)
+    function luvvy.hear(s::Scene{Stage}, ::Genesis!)
         julia = enter!(s, Julia())
 
         say(s, julia, HelloWorld!())
@@ -58,10 +58,10 @@ end
         re::Id
     end
 
-    luvvie.hear(s::Scene{Actor}, msg::HowPopularAreYou!) =
+    luvvy.hear(s::Scene{Actor}, msg::HowPopularAreYou!) =
         say(s, msg.re, my(s).pop)
 
-    luvvie.hear(s::Scene{Actor}, msg::WhoLoves!) = if me(s) != msg.re
+    luvvy.hear(s::Scene{Actor}, msg::WhoLoves!) = if me(s) != msg.re
         delegate(s, my(s).pop, msg.re) do s, my_pop, re
             other_pop = ask(s, re, HowPopularAreYou!(me(s)), Int)
 
@@ -69,23 +69,23 @@ end
         end
     end
 
-    luvvie.hear!(s::Scene{Actor}, ::Val{:i_love_you!}) = let state = my(s)
+    luvvy.hear!(s::Scene{Actor}, ::Val{:i_love_you!}) = let state = my(s)
         my!(s, Actor(state.name, state.pop + 1))
 
         say(s, stage(s), Leave!())
     end
 
-    function luvvie.hear(s::Scene{Stage}, msg::Entered!)
+    function luvvy.hear(s::Scene{Stage}, msg::Entered!)
         roar(s, WhoLoves!(msg.who))     # Nigel
         roar(s, WhoLoves!(my(s).props)) # Brian
     end
 
-    luvvie.hear(s::Scene{Stage}, ::Genesis!) = let st = stage(s)
+    luvvy.hear(s::Scene{Stage}, ::Genesis!) = let st = stage(s)
         say(s, st, Enter!(Actor("Nigel", 0), st))
         my(s).props = enter!(s, Actor("Brian", 1))
     end
 
-    function luvvie.hear(s::Scene{Stage}, msg::Leave!)
+    function luvvy.hear(s::Scene{Stage}, msg::Leave!)
         @test ask(s, my(s).props, HowPopularAreYou!(me(s)), Int) == 2
 
         leave!(s)

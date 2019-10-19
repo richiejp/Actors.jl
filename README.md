@@ -1,9 +1,9 @@
-# Luvvie - An Actor Model Library for Julia
+# Luvvy - An Actor Model Library for Julia
 
 *This library is very much experimental as is Julia threading, so you can take
 my claims with some salt*
 
-Luvvie[^Etymology] helps you to write error resistant, highly parallel
+Luvvy[^Etymology] helps you to write error resistant, highly parallel
 code. It encourages you to fully embrace the Actor model[^Actors], thus
 creating extremely distributed and robust applications.
 
@@ -11,13 +11,13 @@ All else being equal, this library optimises for parallisation and resilience
 over single core performance or memory efficiency. This may be slower in the
 common case, but much improves the performance of the worst case.
 
-The Luvvie base library aims to have no dependencies beyond what is included
+The Luvvy base library aims to have no dependencies beyond what is included
 in Julia itself. I doubt it will work Julia versions less than v1.3.
 
 ## Hello, World!
 
 ```julia
-using luvvie
+using luvvy
 
 "Our Actor"
 struct Julia end
@@ -26,12 +26,12 @@ struct Julia end
 struct HelloWorld! end
 
 # Set handler for all actors for the message HelloWorld!
-luvvie.hear(s::Scene{A}, ::HelloWorld!) where A =
+luvvy.hear(s::Scene{A}, ::HelloWorld!) where A =
     # We shouldn't really use println
 	println("Hello, World! I am $(A)!")
 
 # Set the Genesis! message handler for the builtin Stage actor
-function luvvie.hear(s::Scene{Stage}, ::Genesis!)
+function luvvy.hear(s::Scene{Stage}, ::Genesis!)
 	# Juila enters the stage
 	julia = enter!(s, Julia())
 
@@ -50,7 +50,7 @@ play!(Stage())
 This should print "Hello, World! I am Julia!". The `A` in `Scene{A}` takes the
 type of the Actor (technically the Actor's state) in the Scene.
 
-Note that this isn't the simplest possible use of Luvvie. For that we could
+Note that this isn't the simplest possible use of Luvvy. For that we could
 just print "Hello, World!" in the `Genesis!` handler or use `delegate` to
 spawn a temporary actor (A `Stooge`) without defining it.
 
@@ -62,7 +62,7 @@ In effect, if you use the actor model liberally you no longer need be
 concerned about whether something should be asynchronous or executed in
 parallel, because everything generally is.
 
-Luvvie aims to make defining and calling messages easy. Making them as similar
+Luvvy aims to make defining and calling messages easy. Making them as similar
 to ordinary method calls as possible while discouraging you from making
 various mistakes. The same goes for Actors themselves which you are encouraged
 to define and spawn liberally.

@@ -1,7 +1,7 @@
-name = "luvvie"
-uuid = "9a689b2b-e193-422e-94f3-388711890a53"
+name = "luvvy"
+uuid = "18269d71-cc38-4e02-b8c8-1db30113a6dd"
 authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
-version = "0.1.0"
+version = "0.0.1"
 
 [compat]
 julia = "1.3"

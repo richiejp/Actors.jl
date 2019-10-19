@@ -1,4 +1,4 @@
-module luvvie
+module luvvy
 
 # Types
 export Id, Stage, Scene
