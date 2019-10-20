@@ -221,6 +221,8 @@ end
 struct Enter!
     actor_state
     re::Union{Id, Nothing}
+
+    Enter!(actor_state) = new(actor_state, nothing)
 end
 
 function hear(s::Scene{Stage}, msg::Enter!)
