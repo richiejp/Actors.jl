@@ -1,6 +1,35 @@
 using Test
 using luvvy
+import luvvy: hear # Allows us to write just 'hear(...)' instead of 'luvvy.hear(...)'
 
+# Unusually (I hope) we need to change some of Stage's message handlers dynamically
+# because we create a new stage for each test in the same process.
+mutable struct TestProps
+    genesis::Function
+    entered::Function
+    leave::Function
+end
+
+TestProps() = TestProps(
+    (s, msg) -> error("Dynamic handler for Genesis! not set!"),
+    (s, msg) -> error("Did we expect Stage to be sent $msg?"),
+    (s, msg) -> leave!(s)
+)
+
+hear(s::Scene{Stage}, msg::Genesis!) = my(s).props.genesis(s, msg)
+hear(s::Scene{Stage}, msg::Entered!) = my(s).props.entered(s, msg)
+hear(s::Scene{Stage}, msg::Leave!) = my(s).props.leave(s, msg)
+
+# Used by TestSet.jl, it will be reset after each @testset LuvvyTestset
+# invocation. This is to work around a bug/feature in the @testset macro which
+# qualifies the name of any variable used in the optional arguments with 'Test'.
+props = TestProps()
+
+# Sanity check without using our custom TestSet
+#
+# Even inside the tests we try to stick to using actors for
+# everything. However this test is the exception where we use a Channel
+# directly for collecting the result.
 @testset "Hello, World!" begin
     test_chnl = Channel(1)
 
@@ -13,7 +42,7 @@ using luvvy
     luvvy.hear(s::Scene{A}, ::HelloWorld!) where A =
         put!(test_chnl, "Hello, World! I am $(A)!")
 
-    function luvvy.hear(s::Scene{Stage}, ::Genesis!)
+    props.genesis = (s, _) -> begin
         julia = enter!(s, Julia())
 
         say(s, julia, HelloWorld!())
@@ -21,134 +50,24 @@ using luvvy
         leave!(s)
     end
 
-    play!(Stage())
+    play!(Stage(props))
     @test take!(test_chnl) == "Hello, World! I am Julia!"
     close(test_chnl)
 end
 
-# Popularity begets popularity
-#
-# Script:
-#   We create the stage and this triggers Genesis!
-#   In the handler for the Genesis! message we create two actors
-#   One actor is created by sending the Enter! message (Nigel)
-#   The other actor is created inline (Brian)
-#   When Nigel's Enter! message is processed Entered! is sent
-#   In the Entered! handler we ask all the other actors who loves who
-#   Each actor recieves WhoLoves! messages asking if they love another actor
-#   They spawn a Stooge (with delegate()) to query the other's popularity
-#   (if they didn't it could result in deadlock)
-#   If the other actor is more or equally popular, they give them love
-#   Brian is more popular than Nigel so she gets some love and Nigel doesn't
-#   After Brian increases his popularity, he tells the whole Stage to leave
-#   When the Stage recieves the Leave message, it tests Brians popularity
-#   The library then tells all the actors to leave.
-#
-@testset "luvvies sim" begin
-    struct Actor
-        name::String
-        pop::Int
-    end
-
-    struct WhoLoves!
-        re::Id
-    end
-
-    struct HowPopularAreYou!
-        re::Id
-    end
-
-    luvvy.hear(s::Scene{Actor}, msg::HowPopularAreYou!) =
-        say(s, msg.re, my(s).pop)
-
-    luvvy.hear(s::Scene{Actor}, msg::WhoLoves!) = if me(s) != msg.re
-        delegate(s, my(s).pop, msg.re) do s, my_pop, re
-            other_pop = ask(s, re, HowPopularAreYou!(me(s)), Int)
-
-            my_pop <= other_pop && say(s, re, Val(:i_love_you!))
-        end
-    end
-
-    luvvy.hear!(s::Scene{Actor}, ::Val{:i_love_you!}) = let state = my(s)
-        my!(s, Actor(state.name, state.pop + 1))
-
-        say(s, stage(s), Leave!())
-    end
-
-    function luvvy.hear(s::Scene{Stage}, msg::Entered!)
-        roar(s, WhoLoves!(msg.who))     # Nigel
-        roar(s, WhoLoves!(my(s).props)) # Brian
-    end
-
-    luvvy.hear(s::Scene{Stage}, ::Genesis!) = let st = stage(s)
-        say(s, st, Enter!(Actor("Nigel", 0), st))
-        my(s).props = enter!(s, Actor("Brian", 1))
-    end
-
-    function luvvy.hear(s::Scene{Stage}, msg::Leave!)
-        @test ask(s, my(s).props, HowPopularAreYou!(me(s)), Int) == 2
-
-        leave!(s)
-    end
-
-    play!(Stage())
-end
+props = TestProps()
 
 include("TestSet.jl")
 
-st = Stage()
-@testset LuvvyTestSet stage=st "Actors Stack" begin
-    mutable struct Stack{T}
-        content::Union{T, Nothing}
-        link::Union{Id{Stack{T}}, Nothing}
-        forward::bool
+props.genesis = (s, _) -> delegate(s) do s
+    @test 1 + 1 == 2
 
-        Stack() = new(nothing, nothing, false)
-    end
-
-    luvvy.hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{T, Id}}) where T = if my(s).forward
-        say(s, my(s).link, msg)
-    else
-        (type, m) = msg
-
-        if type === :push!
-            if isnothing(my(s).content)
-                my(s).content = content
-            else
-                r = ask(stage(s), Enter!(my(s)), Entered!)
-                my!(s, Stack(content, r.who, false))
-            end
-        elseif type === :pop! && !isnothing(my(s).content)
-            say(s, m, my(s).content)
-            my(s).forward = true
-        else
-            error("Can't handle $type")
-        end
-    end
-
-    function luvvy.hear(s::Scene{Stage}, ::Genesis!)
-        stak = enter!(s, Stack{Symbol}())
-
-        delegate(s, stak) do s, stack
-            say(s, stack, (:push!, :a))
-            @test ask(s, stack, (:pop!, me(s)), Symbol) == :a
-
-            say(s, stack, (:push!, :b))
-            @test ask(s, stack, (:pop!, me(s)), Symbol) == :b
-        end
-
-        stak = enter!(s, Stack{Int}())
-
-        delegate(s, stak) do s, stack
-            for i in 1:5
-                say(s, stack, (:push!, i))
-            end
-
-            @test ask(s, stack, (:pop!, me(s)), Int) == 5
-
-            say(s, stack, (:push!, 6))
-            @test ask(s, stack, (:pop!, me(s)), Int) == 6
-            @test ask(s, stack, (:pop!, me(s)), Int) == 4
-        end
-    end
+    say(s, stage(s), Leave!())
 end
+
+@testset LuvvyTestSet "TestSet Test" begin
+    testset_play!()
+end
+
+include("Luvvies.jl")
+include("Stack.jl")
