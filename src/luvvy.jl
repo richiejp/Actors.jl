@@ -124,11 +124,6 @@ function listen!(st::Id{Stage}, a::Id)
             showerror(stderr, ex, catch_backtrace())
         end
     end
-
-    try
-        put!(inbox(st), Left!(a))
-    catch
-    end
 end
 
 kill_all!(actors) = for a in actors
@@ -167,12 +162,21 @@ leave!(s::Scene) = close(inbox(s))
 
 play!(st::Id{Stage}) = play!(st, st)
 
+function prologue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S
+    @assert a.task === nothing "Actor is already playing"
+
+    a.task = current_task()
+end
+
 function play!(st::Id{Stage}, a::Id)
-    @assert a.ref[].task === nothing "Actor is already playing"
-
-    a.ref[].task = current_task()
-
+    prologue!(st, my_ref(a), a)
     listen!(st, a)
+    epilogue!(st, my_ref(a), a)
+end
+
+epilogue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S = try
+    put!(inbox(st), Left!(id))
+catch
 end
 
 function enter!(s::Scene{Stage}, actor_state)

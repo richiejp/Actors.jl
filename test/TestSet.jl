@@ -1,36 +1,32 @@
-import Test: AbstractTestSet, DefaultTestSet, record, finish
+import Test: AbstractTestSet, DefaultTestSet, record, finish, Result
 
 "Makes sure the DefaultTestSet is only updated by Stage (i.e. the main thread)"
-struct LuvvyTestSet <: AbstractTestSet
-    default::DefaultTestSet
+mutable struct LuvvyTestSet <: AbstractTestSet
+    ts::DefaultTestSet
 
-    st::Id{Stage}
+    myself::Id{LuvvyTestSet}
 
-    function LuvvyTestSet(desc)
-        st = Stage(props) # props is first set in runtest.jl
-        global props = TestProps()
-
-        new(DefaultTestSet(desc), st)
-    end
+    LuvvyTestSet(desc) = new(DefaultTestSet(desc))
 end
 
-struct Record!
-    ts::LuvvyTestSet
-    res
+function hear(s::Scene{LuvvyTestSet}, res::Result)
+    @info "Recording" res
+
+    record(my(s).ts, msg.res)
 end
 
-function luvvy.hear(s::Scene{Stage}, msg::Record!)
-    @info "Recording" msg.res
+function record(ts::LuvvyTestSet, res::Result)
+    @info "send record" res
 
-    record(msg.ts.default, msg.res)
+    put!(luvvy.inbox(ts.myself), res)
 end
 
-function record(ts::LuvvyTestSet, res)
-    @info "send record" ts.st res
-
-    put!(luvvy.inbox(ts.st), Record!(ts, res))
+function finish(ts::LuvvyTestSet)
+    @info "In finish"
+    finish(ts.ts)
 end
 
-finish(ts::LuvvyTestSet) = finish(ts.default)
-
-testset_play!() = play!(Test.get_testset().st)
+function testset_play!()
+    play!(Stage(props))
+    global props = TestProps()
+end

@@ -16,7 +16,16 @@ TestProps() = TestProps(
     (s, msg) -> leave!(s)
 )
 
-hear(s::Scene{Stage}, msg::Genesis!) = my(s).props.genesis(s, msg)
+include("TestSet.jl")
+
+hear(s::Scene{Stage}, msg::Genesis!) = let ts = Test.get_testset()
+    if ts isa LuvvyTestSet
+        ts.myself = enter!(s, ts)
+    end
+
+    my(s).props.genesis(s, msg)
+end
+
 hear(s::Scene{Stage}, msg::Entered!) = my(s).props.entered(s, msg)
 hear(s::Scene{Stage}, msg::Leave!) = my(s).props.leave(s, msg)
 
@@ -50,22 +59,24 @@ props = TestProps()
         leave!(s)
     end
 
-    play!(Stage(props))
+    testset_play!()
     @test take!(test_chnl) == "Hello, World! I am Julia!"
     close(test_chnl)
 end
 
+luvvy.prologue!(::Id{Stage}, a::Actor{LuvvyTestSet}
+
 props = TestProps()
 
-include("TestSet.jl")
-
-props.genesis = (s, _) -> delegate(s) do s
-    @test 1 + 1 == 2
-
-    say(s, stage(s), Leave!())
-end
-
 @testset LuvvyTestSet "TestSet Test" begin
+    props.genesis = (s, _) -> delegate(s) do s
+        @assert Test.get_testset() isa LuvvyTestSet
+        @test true
+        @test 1 + 1 == 2
+
+        say(s, stage(s), Leave!())
+    end
+
     testset_play!()
 end
 
