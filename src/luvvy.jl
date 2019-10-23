@@ -73,15 +73,16 @@ Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
 mutable struct Stage
     actors::Set{Id}
-    props
-end
+    play::Id
 
-function Stage(props=nothing)
-    a = Id(UInt64(0), Ref(Actor(Stage(Set{Id}(), props))))
+    function Stage(play)
+        st = new(Set{Id}())
+        a = Id(UInt64(0), Ref(Actor(st)))
 
-    put!(inbox(a), Genesis!())
+        put!(inbox(a), PreGenesis!(play))
 
-    a
+        a
+    end
 end
 
 struct Scene{S}
@@ -110,7 +111,7 @@ hear(s::Scene, msg) = hear!(s, msg)
 hear!(::Scene{S}, msg::M) where {S, M} =
     error("Missing message handler, need hear(!)(::Scene{$S}, ::$M)")
 
-function listen!(st::Id{Stage}, a::Id)
+function listen!(st::Id{Stage}, a::Id) where D
     inb = inbox(a)
 
     for msg in inb
@@ -160,6 +161,7 @@ end
 
 leave!(s::Scene) = close(inbox(s))
 
+play!(play) = play!(Stage(play))
 play!(st::Id{Stage}) = play!(st, st)
 
 function prologue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S
@@ -169,9 +171,9 @@ function prologue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S
 end
 
 function play!(st::Id{Stage}, a::Id)
-    prologue!(st, my_ref(a), a)
+    prologue!(st, a.ref[], a)
     listen!(st, a)
-    epilogue!(st, my_ref(a), a)
+    epilogue!(st, a.ref[], a)
 end
 
 epilogue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S = try
@@ -179,6 +181,7 @@ epilogue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S = try
 catch
 end
 
+enter!(s::Scene, actor_state) = ask(s, stage(s), Enter!(actor_state, me(s)), Entered!).who
 function enter!(s::Scene{Stage}, actor_state)
     as = my(s).actors
     a = Id(UInt64(length(as) + 1), Ref(Actor(actor_state)))
@@ -214,16 +217,23 @@ end
 
 # Messages
 
-struct Genesis! end
+struct PreGenesis!{T}
+    play::T
+end
 
-hear(::Scene{Stage}, ::Genesis!) = error("You can't ignore Genesis!")
+function hear(s::Scene{Stage}, msg::PreGenesis!)
+    play = my(s).play = enter!(s, msg.play)
+    say(s, play, Genesis!())
+end
+
+struct Genesis! end
 
 struct Entered!{S}
     who::Id{S}
 end
 
-struct Enter!
-    actor_state
+struct Enter!{S}
+    actor_state::S
     re::Union{Id, Nothing}
 end
 

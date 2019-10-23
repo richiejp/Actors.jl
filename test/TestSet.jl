@@ -1,4 +1,5 @@
 import Test: AbstractTestSet, DefaultTestSet, record, finish, Result
+import luvvy: Actor
 
 "Makes sure the DefaultTestSet is only updated by Stage (i.e. the main thread)"
 mutable struct LuvvyTestSet <: AbstractTestSet
@@ -26,7 +27,8 @@ function finish(ts::LuvvyTestSet)
     finish(ts.ts)
 end
 
-function testset_play!()
-    play!(Stage(props))
-    global props = TestProps()
+function luvvy.prologue!(::Id{Stage}, a::Actor{LuvvyTestSet}, id::Id{LuvvyTestSet})
+    @assert a.task === nothing "Actor is already playing"
+    a.task = current_task()
+    Test.push_testset(a.state)
 end
