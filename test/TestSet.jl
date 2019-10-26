@@ -27,8 +27,11 @@ function finish(ts::LuvvyTestSet)
     finish(ts.ts)
 end
 
-function luvvy.prologue!(::Id{Stage}, a::Actor{LuvvyTestSet}, id::Id{LuvvyTestSet})
-    @assert a.task === nothing "Actor is already playing"
-    a.task = current_task()
-    Test.push_testset(a.state)
+function luvvy.prologue!(::Id{Stage}, st::Actor{Stage}, id::Id{Stage})
+    @assert st.task === nothing "Actor is already playing"
+    @info "in stage prologue"
+    st.task = current_task()
+
+    ts = Test.get_testset()
+    ts.myself = enter!(Scene(id, id), ts)
 end
