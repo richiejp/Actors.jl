@@ -114,16 +114,12 @@ hear!(::Scene{S}, msg::M) where {S, M} =
 function listen!(st::Id{Stage}, a::Id) where D
     inb = inbox(a)
 
+    @debug "$st/$a listening"
+
     for msg in inb
         @debug "$st/$a recv" msg
-        s = Scene(a, st)
 
-        try
-            hear(s, msg)
-        catch ex
-            close(inb)
-            showerror(stderr, ex, catch_backtrace())
-        end
+        hear(Scene(a, st), msg)
     end
 end
 
@@ -132,30 +128,26 @@ kill_all!(actors) = for a in actors
 
     try
         put!(inb, Leave!())
-    catch
+    finally
+        close(inb)
     end
-
-    close(inb)
 end
 
 function listen!(st::Id{Stage}, ::Id{Stage})
     inb = inbox(st)
     as = my(st).actors
 
-    for msg in inb
-        @debug "$st recv" msg
-        s = Scene(st, st)
+    @debug "$st listening"
+    try
+        for msg in inb
+            @debug "$st recv" msg
 
-        try
-            hear(s, msg)
-        catch ex
-            close(inb)
-            kill_all!(as)
-            rethrow()
+            hear(Scene(st, st), msg)
         end
+    finally
+        kill_all!(as)
     end
 
-    kill_all!(as)
     empty!(as)
 end
 
@@ -171,8 +163,15 @@ function prologue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S
 end
 
 function play!(st::Id{Stage}, a::Id)
-    prologue!(st, a.ref[], a)
-    listen!(st, a)
+    try
+        prologue!(st, a.ref[], a)
+        listen!(st, a)
+    catch ex
+        showerror(stderr, ex, catch_backtrace())
+    finally
+        close(inbox(a))
+    end
+
     epilogue!(st, a.ref[], a)
 end
 
