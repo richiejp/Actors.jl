@@ -180,6 +180,12 @@ epilogue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S = try
 catch
 end
 
+function fork!(fn::Function, s::Scene)
+    task = Task(fn)
+    task.sticky = false
+    schedule(task)
+end
+
 enter!(s::Scene, actor_state) = ask(s, stage(s), Enter!(actor_state, me(s)), Entered!).who
 function enter!(s::Scene{Stage}, actor_state)
     as = my(s).actors
@@ -187,9 +193,7 @@ function enter!(s::Scene{Stage}, actor_state)
     push!(as, a)
 
     st = stage(s)
-    task = Task(() -> play!(st, a))
-    task.sticky = false
-    schedule(task)
+    fork!(() -> play!(st, a), s)
 
     a
 end
@@ -236,7 +240,7 @@ struct Enter!{S}
     re::Union{Id, Nothing}
 end
 
-Enter!(actor_state) = new(actor_state, nothing)
+Enter!(actor_state) = Enter!(actor_state, nothing)
 
 function hear(s::Scene{Stage}, msg::Enter!)
     a = enter!(s, msg.actor_state)

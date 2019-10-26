@@ -3,10 +3,6 @@ using luvvy
 import luvvy: hear
 
 # Sanity check without using our custom TestSet
-#
-# Even inside the tests we try to stick to using actors for
-# everything. However this test is the exception where we use a Channel
-# directly for collecting the result.
 @testset "Hello, World!" begin
     test_chnl = Channel(1)
 
@@ -34,6 +30,11 @@ import luvvy: hear
     close(test_chnl)
 end
 
+# Another test not using the TestSet actor
+include("Luvvies.jl")
+
+# Be warned that this overrides prologue! and fork! to inject the LuvvyTestSet
+# actor. This is less than ideal.
 include("TestSet.jl")
 
 @testset LuvvyTestSet "TestSet Test" begin
@@ -49,5 +50,4 @@ include("TestSet.jl")
     play!(TestSetTest())
 end
 
-include("Luvvies.jl")
 include("Stack.jl")
