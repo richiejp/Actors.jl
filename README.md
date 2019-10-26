@@ -19,32 +19,30 @@ in Julia itself. I doubt it will work Julia versions less than v1.3.
 ```julia
 using luvvy
 
-"Our Actor"
+"Our Play actor"
+struct HelloWorld end
+
+"Our Actor actor"
 struct Julia end
 
 "Our Message"
 struct HelloWorld! end
 
-# Set handler for all actors for the message HelloWorld!
-luvvy.hear(s::Scene{A}, ::HelloWorld!) where A =
-    # We shouldn't really use println
+"Handle messages of type HelloWorld! for all actors"
+function luvvy.hear(s::Scene{A}, ::HelloWorld!) where A
 	println("Hello, World! I am $(A)!")
 
-# Set the Genesis! message handler for the builtin Stage actor
-function luvvy.hear(s::Scene{Stage}, ::Genesis!)
-	# Juila enters the stage
-	julia = enter!(s, Julia())
-
-	# Send the HelloWorld! message to Julia (The Stage talks to some actors)
-	say(s, julia, HelloWorld!())
-
-	# The stage leaves, but don't worry, Julia can say her line before
-	# gravity takes effect.
-	leave!(s)
+	# Asking the Stage to leave stops the play
+	say(s, stage(s), Leave!())
 end
 
-# Create the stage and send it Genesis! (this blocks until the stage leaves)
-play!(Stage())
+"Handle Genesis! which is sent to our play actor on startup"
+luvvy.hear(s::Scene{HelloWorld}, ::Genesis!) =
+	# Enter Julia into the play and send her the HelloWorld! message
+	say(s, enter!(s, Julia()), HelloWorld!())
+
+# Start our play and block while waiting for it to finish
+play!(HelloWorld())
 ```
 
 This should print "Hello, World! I am Julia!". The `A` in `Scene{A}` takes the
@@ -54,7 +52,7 @@ Note that this isn't the simplest possible use of Luvvy. For that we could
 just print "Hello, World!" in the `Genesis!` handler or use `delegate` to
 spawn a temporary actor (A `Stooge`) without defining it.
 
-See `test/runtest.jl` for (one) more example(s).
+See `test/runtest.jl` for more examples.
 
 ## More spiel
 
