@@ -33,8 +33,7 @@ end
 # Another test not using the TestSet actor
 include("Luvvies.jl")
 
-# Be warned that this overrides prologue! and fork! to inject the LuvvyTestSet
-# actor. This is less than ideal.
+# LuvvyTestSet
 include("TestSet.jl")
 
 @testset LuvvyTestSet "TestSet Test" begin
@@ -51,3 +50,4 @@ include("TestSet.jl")
 end
 
 include("Stack.jl")
+include("TypedMessages.jl")

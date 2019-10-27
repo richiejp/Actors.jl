@@ -42,17 +42,17 @@ export Genesis!, Entered!, Enter!, Leave!, Roar!, Forward!
 #
 # Types/Structs which are messages have a bang attached (e.g. Leave!)
 
-mutable struct Actor{S}
-    inbox::Channel{Any}
+mutable struct Actor{S, M}
+    inbox::Channel{M}
     state::S
     task::Union{Task, Nothing}
 end
 
-Actor(data) = Actor(Channel(420), data, nothing)
+Actor{M}(data) where M = Actor(Channel{M}(420), data, nothing)
 
-struct Id{S}
+struct Id{S, M}
     i::UInt64
-    ref::Union{Ref{Actor{S}}, Nothing}
+    ref::Union{Ref{Actor{S, M}}, Nothing}
 end
 
 Base.:(==)(a::Id, b::Id) = a.i == b.i
@@ -80,7 +80,7 @@ mutable struct Stage <: AbsStage
 
     function Stage(play)
         st = new(Set{Id}())
-        a = Id(UInt64(0), Ref(Actor(st)))
+        a = Id(UInt64(0), Ref(Actor{Any}(st)))
 
         put!(inbox(a), PreGenesis!(play))
 
@@ -88,9 +88,9 @@ mutable struct Stage <: AbsStage
     end
 end
 
-struct Scene{S}
-    subject::Id{S}
-    stage::Id{Stage}
+struct Scene{S, M}
+    subject::Id{S, M}
+    stage::Id{Stage, Any}
 end
 
 me(s::Scene) = s.subject
@@ -187,10 +187,11 @@ function fork(fn::Function)
     schedule(task)
 end
 
-enter!(s::Scene, actor_state) = ask(s, stage(s), Enter!(actor_state, me(s)), Entered!).who
-function enter!(s::Scene{Stage}, actor_state)
+enter!(s::Scene{<:AbsStage}, actor_state::S) where S = enter!(s, actor_state, Any)
+
+function enter!(s::Scene{<:AbsStage}, actor_state::S, ::Type{M}) where {S, M}
     as = my(s).actors
-    a = Id(UInt64(length(as) + 1), Ref(Actor(actor_state)))
+    a = Id(UInt64(length(as) + 1), Ref(Actor{M}(actor_state)))
     push!(as, a)
 
     st = stage(s)
@@ -233,19 +234,24 @@ end
 
 struct Genesis! end
 
-struct Entered!{S}
-    who::Id{S}
+struct Entered!{S, M}
+    who::Id{S, M}
 end
 
-struct Enter!{S}
+struct Enter!{S, M}
     actor_state::S
     re::Union{Id, Nothing}
 end
 
-Enter!(actor_state) = Enter!(actor_state, nothing)
+Enter!{M}(actor_state::S) where {S, M} = Enter!{S, M}(actor_state, nothing)
 
-function hear(s::Scene{Stage}, msg::Enter!)
-    a = enter!(s, msg.actor_state)
+enter!(s::Scene, actor_state::S) where S =
+    ask(s, stage(s), Enter!{S, Any}(actor_state, me(s)), Entered!{S, Any}).who
+enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
+    ask(s, stage(s), Enter!{S, M}(actor_state, me(s)), Entered!{S, M}).who
+
+function hear(s::Scene{<:AbsStage}, msg::Enter!{S, M}) where {S, M}
+    a = enter!(s, msg.actor_state, M)
 
     if isnothing(msg.re)
         say(s, a, Entered!(a))
@@ -296,6 +302,6 @@ hear(s::Scene{Stooge}, ::Entered!{Stooge}) = let stooge = my(s)
 end
 
 delegate(action::Function, s::Scene, args...) =
-    say(s, stage(s), Enter!(Stooge(action, args), nothing))
+    say(s, stage(s), Enter!{Any}(Stooge(action, args)))
 
 end # module
