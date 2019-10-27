@@ -24,6 +24,7 @@ export Genesis!, Entered!, Enter!, Leave!, Roar!, Forward!
 # re  = return address (i.e. who to reply to)
 # st  = Stage
 # s   = Scene
+# Abs = Abstract
 #
 # Avoid using any other abbreviations except in algorithms with a high level
 # of abstraction where the variables have no "common sense" meaning. You don't
@@ -71,7 +72,9 @@ inbox(a::Id) = a.ref[].inbox
 
 Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
-mutable struct Stage
+abstract type AbsStage end
+
+mutable struct Stage <: AbsStage
     actors::Set{Id}
     play::Id
 
@@ -104,22 +107,16 @@ else
 end
 
 shout(s::Scene, to::Id, msg) = error("Not implemented")
-
 roar(s::Scene, msg) = say(s, stage(s), Roar!(msg))
+hear(s::Scene{<:AbsStage}, msg) = say(s, my(s).play, msg)
 
-hear(s::Scene, msg) = hear!(s, msg)
-hear!(::Scene{S}, msg::M) where {S, M} =
-    error("Missing message handler, need hear(!)(::Scene{$S}, ::$M)")
+function listen!(s::Scene)
+    @debug "$s listening"
 
-function listen!(st::Id{Stage}, a::Id) where D
-    inb = inbox(a)
+    for msg in inbox(s)
+        @debug "$s recv" msg
 
-    @debug "$st/$a listening"
-
-    for msg in inb
-        @debug "$st/$a recv" msg
-
-        hear(Scene(a, st), msg)
+        hear(s, msg)
     end
 end
 
@@ -133,16 +130,16 @@ kill_all!(actors) = for a in actors
     end
 end
 
-function listen!(st::Id{Stage}, ::Id{Stage})
-    inb = inbox(st)
-    as = my(st).actors
+function listen!(s::Scene{<:AbsStage})
+    inb = inbox(s)
+    as = my(s).actors
 
-    @debug "$st listening"
+    @debug "$s listening"
     try
         for msg in inb
-            @debug "$st recv" msg
+            @debug "$s recv" msg
 
-            hear(Scene(st, st), msg)
+            hear(s, msg)
         end
     finally
         kill_all!(as)
@@ -153,34 +150,38 @@ end
 
 leave!(s::Scene) = close(inbox(s))
 
-play!(play) = play!(Stage(play))
-play!(st::Id{Stage}) = play!(st, st)
+capture_environment(::Id) = nothing
 
-function prologue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S
-    @assert a.task === nothing "Actor is already playing"
-
-    a.task = current_task()
+play!(play) = let st = Stage(play)
+    play!(Scene(st, st), capture_environment(st))
 end
 
-function play!(st::Id{Stage}, a::Id)
+function prologue!(s::Scene, environment) end
+
+function play!(s::Scene, environment)
     try
-        prologue!(st, a.ref[], a)
-        listen!(st, a)
+        let a = s.subject.ref[]
+            @assert a.task === nothing "Actor is already playing"
+            a.task = current_task()
+        end
+
+        prologue!(s, environment)
+        listen!(s)
     catch ex
         showerror(stderr, ex, catch_backtrace())
     finally
-        close(inbox(a))
+        close(inbox(s))
     end
 
-    epilogue!(st, a.ref[], a)
+    epilogue!(s, environment)
 end
 
-epilogue!(st::Id{Stage}, a::Actor{S}, id::Id{S}) where S = try
-    put!(inbox(st), Left!(id))
+epilogue!(s::Scene, environment) = try
+    say(s, stage(s), Left!(me(s)))
 catch
 end
 
-function fork!(fn::Function, s::Scene)
+function fork(fn::Function)
     task = Task(fn)
     task.sticky = false
     schedule(task)
@@ -193,7 +194,8 @@ function enter!(s::Scene{Stage}, actor_state)
     push!(as, a)
 
     st = stage(s)
-    fork!(() -> play!(st, a), s)
+    env = capture_environment(st)
+    fork(() -> play!(Scene(a, st), env))
 
     a
 end
@@ -224,7 +226,7 @@ struct PreGenesis!{T}
     play::T
 end
 
-function hear(s::Scene{Stage}, msg::PreGenesis!)
+function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
     play = my(s).play = enter!(s, msg.play)
     say(s, play, Genesis!())
 end
@@ -278,6 +280,7 @@ end
 struct Leave! end
 
 hear(s::Scene, msg::Leave!) = close(inbox(s))
+hear(s::Scene{<:AbsStage}, msg::Leave!) = close(inbox(s)) # Prevent ambiguity
 
 # Extras
 

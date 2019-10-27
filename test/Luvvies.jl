@@ -31,7 +31,7 @@
         end
     end
 
-    luvvy.hear!(s::Scene{Darling}, ::Val{:i_love_you!}) = let state = my(s)
+    luvvy.hear(s::Scene{Darling}, ::Val{:i_love_you!}) = let state = my(s)
         my!(s, Darling(state.name, state.pop + 1))
 
         say(s, stage(s), Leave!())

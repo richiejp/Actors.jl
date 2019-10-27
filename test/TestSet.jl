@@ -1,7 +1,7 @@
 import Test: AbstractTestSet, DefaultTestSet, record, finish, Result
 import luvvy: Actor
 
-"Makes sure the DefaultTestSet is only updated by a single thread"
+"Allows the Test macros to be safely used in any actor"
 mutable struct LuvvyTestSet <: AbstractTestSet
     ts::DefaultTestSet
 
@@ -17,23 +17,16 @@ finish(ts::LuvvyTestSet) = finish(ts.ts)
 # Note that overriding the following methods is considered a last resort for
 # integrating with another library.
 
-# Inject the test set actor into our play
-function luvvy.prologue!(::Id{Stage}, st::Actor{Stage}, id::Id{Stage})
-    @assert st.task === nothing "Actor is already playing"
-    st.task = current_task()
-
-    ts = Test.get_testset()
-    ts.myself = enter!(Scene(id, id), ts)
+struct TestEnvironment
+    ts::LuvvyTestSet
 end
+
+# Get our test set from the main task's (The Stage's task) local storage
+luvvy.capture_environment(::Id{Stage}) = TestEnvironment(Test.get_testset())
+
+# Inject the test set actor into our play when the Stage starts
+luvvy.prologue!(s::Scene{Stage}, env::TestEnvironment) =
+    env.ts.myself = enter!(s, env.ts)
 
 # Inject the test set into a new actor's Task local storage
-function luvvy.fork!(fn::Function, s::Scene)
-    ts = Test.get_testset()
-    task = Task() do
-        Test.push_testset(ts)
-        fn()
-    end
-
-    task.sticky = false
-    schedule(task)
-end
+luvvy.prologue!(s::Scene, env::TestEnvironment) = Test.push_testset(env.ts)
