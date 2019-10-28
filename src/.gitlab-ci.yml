@@ -1,0 +1,5 @@
+default:
+  image: julia:1.3
+
+test:
+  script: julia --color=true --project test/runtests.jl
