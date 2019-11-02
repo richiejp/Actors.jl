@@ -1,14 +1,17 @@
 module luvvy
 
-# Types
-export Id, Stage, Scene
+# Misc Types
+export Id, Scene
+
+# Actors
+export Stage, Troupe
 
 # Functions
-export genesis, stage, play!, enter!, leave!, ask, say, roar, hear, me, my,
-       my!, delegate
+export genesis, stage, play!, enter!, leave!, ask, say, hear, me, my, my!
+export delegate, shout
 
-# Message Types
-export Genesis!, Entered!, Enter!, Leave!, Roar!, Forward!
+# Messages
+export Genesis!, Entered!, Enter!, Leave!
 
 # _Naming Conventions_
 #
@@ -25,6 +28,7 @@ export Genesis!, Entered!, Enter!, Leave!, Roar!, Forward!
 # st  = Stage
 # s   = Scene
 # Abs = Abstract
+# env = environment
 #
 # Avoid using any other abbreviations except in algorithms with a high level
 # of abstraction where the variables have no "common sense" meaning. You don't
@@ -46,9 +50,10 @@ mutable struct Actor{S, M}
     inbox::Channel{M}
     state::S
     task::Union{Task, Nothing}
+    minder
 end
 
-Actor{M}(data) where M = Actor(Channel{M}(420), data, nothing)
+Actor{M}(data, minder) where M = Actor(Channel{M}(420), data, nothing, minder)
 
 struct Id{S, M}
     i::UInt64
@@ -69,6 +74,8 @@ my(a::Id) = my_ref(a)[].state
 my!(a::Id, state) = my_ref(a)[].state = state
 
 inbox(a::Id) = a.ref[].inbox
+minder(a::Id)::Id = my_ref(a)[].minder
+minder!(a::Id, minder::Id)::Id = my_ref(a)[].minder = minder
 
 Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
@@ -76,11 +83,14 @@ abstract type AbsStage end
 
 mutable struct Stage <: AbsStage
     actors::Set{Id}
+    time_to_leave::Union{Timer, Nothing}
     play::Id
 
     function Stage(play)
-        st = new(Set{Id}())
-        a = Id(UInt64(0), Ref(Actor{Any}(st)))
+        st = new(Set{Id}(), nothing)
+        actor = Actor{Any}(st, Id{Nothing, Nothing}(UInt64(0), nothing))
+        a = Id(UInt64(0), Ref(actor))
+        actor.minder = a
 
         put!(inbox(a), PreGenesis!(play))
 
@@ -98,6 +108,8 @@ my(s::Scene) = my(me(s))
 my!(s::Scene, state) = my!(me(s), state)
 stage(s::Scene) = s.stage
 inbox(s::Scene) = inbox(me(s))
+minder(s::Scene) = minder(me(s))
+minder!(s::Scene, minder::Id) = minder!(me(s), minder)
 
 say(s::Scene, to::Id, msg) = if to.ref === nothing
     error("$to appears to be a remote actor; use shout instead")
@@ -106,8 +118,6 @@ else
     put!(inbox(to), msg)
 end
 
-shout(s::Scene, to::Id, msg) = error("Not implemented")
-roar(s::Scene, msg) = say(s, stage(s), Roar!(msg))
 hear(s::Scene{<:AbsStage}, msg) = say(s, my(s).play, msg)
 
 function listen!(s::Scene)
@@ -135,20 +145,28 @@ function listen!(s::Scene{<:AbsStage})
     as = my(s).actors
 
     @debug "$s listening"
-    try
-        for msg in inb
-            @debug "$s recv" msg
+    for msg in inb
+        @debug "$s recv" msg
 
-            hear(s, msg)
+        hear(s, msg)
+
+        if !isnothing(my(s).time_to_leave) && isempty(as)
+            close(my(s).time_to_leave)
+            close(inb)
         end
-    finally
-        kill_all!(as)
     end
-
-    empty!(as)
 end
 
 leave!(s::Scene) = close(inbox(s))
+function leave!(s::Scene{<:AbsStage})
+    kill_all!(my(s).actors)
+
+    my(s).time_to_leave = timer = Timer(1)
+    @async begin
+        wait(timer)
+        close(inbox(s))
+    end
+end
 
 capture_environment(::Id) = nothing
 
@@ -156,29 +174,39 @@ play!(play) = let st = Stage(play)
     play!(Scene(st, st), capture_environment(st))
 end
 
-function prologue!(s::Scene, environment) end
+function prologue!(s::Scene, env) end
 
-function play!(s::Scene, environment)
+function play!(s::Scene, env)
     try
         let a = s.subject.ref[]
             @assert a.task === nothing "Actor is already playing"
             a.task = current_task()
         end
 
-        prologue!(s, environment)
+        prologue!(s, env)
         listen!(s)
+        epilogue!(s, env)
     catch ex
-        showerror(stderr, ex, catch_backtrace())
+        dieing_breath!(s, ex, env)
+        rethrow()
     finally
         close(inbox(s))
     end
-
-    epilogue!(s, environment)
 end
 
-epilogue!(s::Scene, environment) = try
-    say(s, stage(s), Left!(me(s)))
-catch
+epilogue!(s::Scene, env) = say(s, minder(s), Left!(me(s)))
+epilogue!(s::Scene{<:AbsStage}, env) = nothing
+dieing_breath!(s::Scene, ex, env) = let a = me(s)
+    say(s, minder(s), Died!(a, my_ref(a)[]))
+end
+
+function register!(s::Scene{<:AbsStage}, actor::Actor)::Id
+    as = my(s).actors
+    a = Id(UInt64(length(as) + 1), Ref(actor))
+
+    push!(as, a)
+
+    a
 end
 
 function fork(fn::Function)
@@ -188,14 +216,14 @@ function fork(fn::Function)
 end
 
 enter!(s::Scene{<:AbsStage}, actor_state::S) where S = enter!(s, actor_state, Any)
+enter!(s::Scene{<:AbsStage}, actor_state::S, ::Type{M}) where {S, M} =
+    enter!(s, Actor{M}(actor_state, minder(s)))
 
-function enter!(s::Scene{<:AbsStage}, actor_state::S, ::Type{M}) where {S, M}
-    as = my(s).actors
-    a = Id(UInt64(length(as) + 1), Ref(Actor{M}(actor_state)))
-    push!(as, a)
-
+function enter!(s::Scene{<:AbsStage}, actor::Actor)
+    a = register!(s, actor)
     st = stage(s)
     env = capture_environment(st)
+
     fork(() -> play!(Scene(a, st), env))
 
     a
@@ -228,6 +256,9 @@ struct PreGenesis!{T}
 end
 
 function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
+    logger = enter!(s, Logger())
+    minder!(s, enter!(s, PassiveMinder(logger)))
+
     play = my(s).play = enter!(s, msg.play)
     say(s, play, Genesis!())
 end
@@ -266,29 +297,53 @@ end
 
 hear(s::Scene{Stage}, msg::Left!) = delete!(my(s).actors, msg.who)
 
-struct Forward!{T}
-    msg::T
+struct Died!
+    who::Id
+    corpse::Actor
 end
 
-struct Roar!{T}
-    msg::T
-end
-
-hear(s::Scene{Stage}, roar::Roar!) = for a in my(s).actors
-    try
-        say(s, a, roar.msg)
-    catch ex
-        ex isa InvalidStateException || rethrow()
-        @debug "$(me(s)) $a left without saying goodbye!"
-    end
-end
+hear(s::Scene{<:AbsStage}, msg::Died!) = close(inbox(s))
 
 struct Leave! end
 
-hear(s::Scene, msg::Leave!) = close(inbox(s))
-hear(s::Scene{<:AbsStage}, msg::Leave!) = close(inbox(s)) # Prevent ambiguity
+hear(s::Scene, msg::Leave!) = leave!(s)
+# Prevents ambiguity with hear(s::Scene{Stage}, msg)
+hear(s::Scene{<:AbsStage}, msg::Leave!) = leave!(s)
 
-# Extras
+# Actors (Other than Stage)
+
+struct Logger end
+
+struct LogDied!
+    header::String
+    died::Died!
+end
+
+hear(s::Scene{Logger}, msg::LogDied!) = try
+    state = my(s)
+
+    printstyled("Error: "; bold=true, color=Base.error_color())
+    printstyled(msg.header; color=Base.error_color())
+    println()
+    task = msg.died.corpse.task
+    showerror(stdout, task.exception, task.backtrace)
+catch ex
+    @debug "Arhhgg; Logger died while trying to do its basic duty" ex
+    rethrow()
+end
+
+struct PassiveMinder
+    logger::Union{Id{Logger}, Nothing}
+end
+
+hear(s::Scene{PassiveMinder}, msg::Left!) = nothing
+hear(s::Scene{PassiveMinder}, msg::Died!) = try
+    say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+    say(s, stage(s), msg)
+catch ex
+    @debug "Arrgg; PassiveMinder died while trying to do its basic duty" ex
+    rethrow()
+end
 
 struct Stooge
     action::Function
@@ -303,5 +358,21 @@ end
 
 delegate(action::Function, s::Scene, args...) =
     say(s, stage(s), Enter!{Any}(Stooge(action, args)))
+
+struct Troupe
+    as::Vector{Id}
+
+    Troupe(as...) = new([as...])
+end
+
+struct Shout!{T}
+    msg::T
+end
+
+shout(s::Scene, troupe::Id{Troupe}, msg) = say(s, troupe, Shout!(msg))
+
+hear(s::Scene{Troupe}, shout::Shout!) = for a in my(s).as
+    say(s, a, shout.msg)
+end
 
 end # module

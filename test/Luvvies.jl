@@ -1,57 +1,68 @@
 # Popularity begets popularity
-@testset "luvvies sim" begin
-    struct Darling
-        name::String
-        pop::Int
+struct Darling
+    name::String
+    pop::Int
+    play::Id
+end
+
+struct LuvviesPlay
+    brian::Id{Darling}
+    nigel::Id{Darling}
+
+    LuvviesPlay() = new()
+    LuvviesPlay(b, n) = new(b, n)
+end
+
+struct WhoLoves!
+    re::Id
+end
+
+struct HowPopularAreYou!
+    re::Id
+end
+
+struct DeclarePop!
+    pop::Int
+    who::Id
+end
+
+hear(s::Scene{Darling}, msg::HowPopularAreYou!) =
+    say(s, msg.re, my(s).pop)
+
+hear(s::Scene{Darling}, msg::WhoLoves!) = if me(s) != msg.re
+    delegate(s, my(s).pop, msg.re) do s, my_pop, re
+        other_pop = ask(s, re, HowPopularAreYou!(me(s)), Int)
+
+        my_pop <= other_pop && say(s, re, Val(:i_love_you!))
     end
+end
 
-    mutable struct LuvviesPlay
-        brian::Id{Darling}
-        nigel::Id{Darling}
+function hear(s::Scene{Darling}, ::Val{:i_love_you!})
+    state = my(s)
+    state = my!(s, Darling(state.name, state.pop + 1, state.play))
 
-        LuvviesPlay() = new()
-    end
+    say(s, state.play, DeclarePop!(state.pop, me(s)))
+end
 
-    struct WhoLoves!
-        re::Id
-    end
+function hear(s::Scene{LuvviesPlay}, ::Genesis!)
+    nigel = enter!(s, Darling("Nigel", 0, me(s)))
+    brian = enter!(s, Darling("Brian", 1, me(s)))
+    troupe = enter!(s, Troupe(nigel, brian))
 
-    struct HowPopularAreYou!
-        re::Id
-    end
+    shout(s, troupe, WhoLoves!(nigel))
+    shout(s, troupe, WhoLoves!(brian))
 
-    luvvy.hear(s::Scene{Darling}, msg::HowPopularAreYou!) =
-        say(s, msg.re, my(s).pop)
+    my!(s, LuvviesPlay(brian, nigel))
+end
 
-    luvvy.hear(s::Scene{Darling}, msg::WhoLoves!) = if me(s) != msg.re
-        delegate(s, my(s).pop, msg.re) do s, my_pop, re
-            other_pop = ask(s, re, HowPopularAreYou!(me(s)), Int)
+function hear(s::Scene{LuvviesPlay}, msg::DeclarePop!)
+    @test msg.who == my(s).brian
+    @test msg.pop == 2
+    @test ask(s, my(s).nigel, HowPopularAreYou!(me(s)), Int) == 0
 
-            my_pop <= other_pop && say(s, re, Val(:i_love_you!))
-        end
-    end
+    say(s, stage(s), Leave!())
+end
 
-    luvvy.hear(s::Scene{Darling}, ::Val{:i_love_you!}) = let state = my(s)
-        my!(s, Darling(state.name, state.pop + 1))
-
-        say(s, stage(s), Leave!())
-    end
-
-    luvvy.hear(s::Scene{LuvviesPlay}, ::Genesis!) = let st = stage(s)
-        nigel = enter!(s, Darling("Nigel", 0))
-        brian = enter!(s, Darling("Brian", 1))
-
-        roar(s, WhoLoves!(nigel))
-        roar(s, WhoLoves!(brian))
-
-        state = my(s)
-        state.nigel = nigel
-        state.brian = brian
-    end
-
-    play = LuvviesPlay()
-    play!(play)
-
-    @test play.brian.ref[].state.pop == 2
-    @test play.nigel.ref[].state.pop == 0
+@testset LuvvyTestSet expect=3 "luvvies sim" begin
+    play!(LuvviesPlay())
 end

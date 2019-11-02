@@ -1,18 +1,35 @@
-import Test: AbstractTestSet, DefaultTestSet, record, finish, Result
+import Test: AbstractTestSet, DefaultTestSet, record, finish, Result, Pass
 import luvvy: Actor
 
 "Allows the Test macros to be safely used in any actor"
 mutable struct LuvvyTestSet <: AbstractTestSet
-    ts::DefaultTestSet
+    desc::String
+    results::Vector{Result}
+    expect::Int
 
     myself::Id{LuvvyTestSet}
 
-    LuvvyTestSet(desc) = new(DefaultTestSet(desc))
+    LuvvyTestSet(desc; expect=0) = new(desc, [], expect)
 end
 
-hear(s::Scene{LuvvyTestSet}, res::Result) = record(my(s).ts, res)
+hear(s::Scene{LuvvyTestSet}, res::Result) = push!(my(s).results, res)
 record(ts::LuvvyTestSet, res::Result) = put!(luvvy.inbox(ts.myself), res)
-finish(ts::LuvvyTestSet) = finish(ts.ts)
+finish(ts::LuvvyTestSet) = let dts = DefaultTestSet(ts.desc)
+    wrong_length = ts.expect > 0 && ts.expect != length(ts.results)
+
+    if any(res -> !(res isa Pass), ts.results) || wrong_length
+        sleep(0.5)
+    end
+
+    foreach(res -> record(dts, res), ts.results)
+    finish(dts)
+
+    if wrong_length
+        printstyled("Test Set Error: "; bold=true, color=Base.error_color())
+        printstyled("Expected $(ts.expect) '$(ts.desc)' tests in total!\n";
+                    color=Base.error_color())
+    end
+end
 
 # Note that overriding the following methods is considered a last resort for
 # integrating with another library.

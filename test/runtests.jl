@@ -30,12 +30,7 @@ import luvvy: hear
     close(test_chnl)
 end
 
-# Another test not using the TestSet actor
-include("Luvvies.jl")
-
-# LuvvyTestSet
 include("TestSet.jl")
-
 @testset LuvvyTestSet "TestSet Test" begin
     struct TestSetTest end
 
@@ -49,5 +44,6 @@ include("TestSet.jl")
     play!(TestSetTest())
 end
 
+include("Luvvies.jl")
 include("Stack.jl")
 include("TypedMessages.jl")
