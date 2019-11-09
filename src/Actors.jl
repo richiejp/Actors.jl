@@ -1,4 +1,4 @@
-module luvvy
+module Actors
 
 # Misc Types
 export Id, Scene
@@ -135,6 +135,8 @@ kill_all!(actors) = for a in actors
 
     try
         put!(inb, Leave!())
+    catch ex
+        ex isa InvalidStateException || rethrow()
     finally
         close(inb)
     end

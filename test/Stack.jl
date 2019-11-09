@@ -8,7 +8,7 @@ end
 
 Stack{T}() where T = Stack{T}(nothing, nothing, false)
 
-luvvy.hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{T, Id}}) where T =
+hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{T, Id}}) where T =
     if my(s).forward
         say(s, my(s).link, msg)
     else
@@ -33,7 +33,7 @@ luvvy.hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{T, Id}}) where T =
         end
     end
 
-function luvvy.hear(s::Scene{StackPlay}, ::Genesis!)
+function hear(s::Scene{StackPlay}, ::Genesis!)
     stack = enter!(s, Stack{Symbol}())
 
     say(s, stack, (:push!, :a))

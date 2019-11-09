@@ -1,46 +1,50 @@
 using Test
-using luvvy
-import luvvy: hear
+using Actors
+import Actors: hear
 
 # Sanity check without using our custom TestSet
+"Our Play"
+struct HelloWorld
+    chnl::Channel
+end
+
+"Our Actor"
+struct Julia end
+
+"Our Message"
+struct HelloWorld!
+    chnl::Channel
+end
+
+function hear(s::Scene{A}, msg::HelloWorld!) where A
+    put!(msg.chnl, "Hello, World! I am $(A)!")
+    say(s, stage(s), Leave!())
+end
+
+function hear(s::Scene{HelloWorld}, ::Genesis!)
+    julia = enter!(s, Julia())
+    say(s, julia, HelloWorld!(my(s).chnl))
+end
+
 @testset "Hello, World!" begin
-    test_chnl = Channel(1)
+    p = HelloWorld(Channel(1))
 
-    "Our Play"
-    struct HelloWorld end
-
-    "Our Actor"
-    struct Julia end
-
-    "Our Message"
-    struct HelloWorld! end
-
-    function luvvy.hear(s::Scene{A}, ::HelloWorld!) where A
-        put!(test_chnl, "Hello, World! I am $(A)!")
-        say(s, stage(s), Leave!())
-    end
-
-    function luvvy.hear(s::Scene{HelloWorld}, ::Genesis!)
-        julia = enter!(s, Julia())
-        say(s, julia, HelloWorld!())
-    end
-
-    play!(HelloWorld())
-    @test take!(test_chnl) == "Hello, World! I am Julia!"
-    close(test_chnl)
+    play!(p)
+    @test take!(p.chnl) == "Hello, World! I am Julia!"
+    close(p.chnl)
 end
 
 include("TestSet.jl")
+struct TestSetTest end
+
+function hear(s::Scene{TestSetTest}, ::Genesis!)
+    @assert Test.get_testset() isa LuvvyTestSet
+    @test true
+
+    say(s, stage(s), Leave!())
+end
+
 @testset LuvvyTestSet "TestSet Test" begin
-    struct TestSetTest end
-
-    function luvvy.hear(s::Scene{TestSetTest}, ::Genesis!)
-        @assert Test.get_testset() isa LuvvyTestSet
-        @test true
-
-        say(s, stage(s), Leave!())
-    end
-
     play!(TestSetTest())
 end
 
