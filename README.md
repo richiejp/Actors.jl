@@ -16,9 +16,9 @@ in Julia itself. I doubt it will work Julia versions less than v1.3.
 
 ## Luvvy
 
-This library was called Luvvy, but was renamed to
-[Actors.jl](https://gitlab.com/Palethorpe/actors.jl). [Luvvy](https://gitlab.com/Palethorpe/luvvy)
-may become something else which builds on Actors.jl.
+This library was called [Luvvy](https://gitlab.com/Palethorpe/luvvy), but was
+renamed to [Actors.jl](https://gitlab.com/Palethorpe/actors.jl). Luvvy may
+become something else which builds on Actors.jl.
 
 ## Hello, World!
 
