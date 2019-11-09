@@ -1,23 +1,31 @@
-# Luvvy - An Actor Model Library for Julia
+# Actors.jl - An Actor Model Library for Julia
 
 *This library is very much experimental as is Julia threading, so you can take
 my claims with some salt*
 
-Luvvy[^Etymology] helps you to write error resistant, highly parallel
-code. It encourages you to fully embrace the Actor model[^Actors], thus
-creating extremely distributed and robust applications.
+Actors.jl helps you to write error resistant, highly parallel code. It
+encourages you to fully embrace the Actor model[^Actors], thus creating
+extremely distributed and robust applications.
 
 All else being equal, this library optimises for parallisation and resilience
 over single core performance or memory efficiency. This may be slower in the
 common case, but much improves the performance of the worst case.
 
-The Luvvy base library aims to have no dependencies beyond what is included
+The Actors.jl base library aims to have no dependencies beyond what is included
 in Julia itself. I doubt it will work Julia versions less than v1.3.
+
+## Luvvy
+
+This library was called Luvvy, but was renamed to
+[Actors.jl](https://gitlab.com/Palethorpe/actors.jl). [Luvvy](https://gitlab.com/Palethorpe/luvvy)
+may become something else which builds on Actors.jl.
 
 ## Hello, World!
 
 ```julia
-using luvvy
+using Actors
+# Allows us to write 'hear' instead of 'Actors.hear'
+import Actors: hear
 
 "Our Play actor"
 struct HelloWorld end
@@ -29,7 +37,7 @@ struct Julia end
 struct HelloWorld! end
 
 "Handle messages of type HelloWorld! for all actors"
-function luvvy.hear(s::Scene{A}, ::HelloWorld!) where A
+function hear(s::Scene{A}, ::HelloWorld!) where A
 	println("Hello, World! I am $(A)!")
 
 	# Asking the Stage to leave stops the play
@@ -37,7 +45,7 @@ function luvvy.hear(s::Scene{A}, ::HelloWorld!) where A
 end
 
 "Handle Genesis! which is sent to our play actor on startup"
-luvvy.hear(s::Scene{HelloWorld}, ::Genesis!) =
+hear(s::Scene{HelloWorld}, ::Genesis!) =
 	# Enter Julia into the play and send her the HelloWorld! message
 	say(s, enter!(s, Julia()), HelloWorld!())
 
@@ -48,7 +56,7 @@ play!(HelloWorld())
 This should print "Hello, World! I am Julia!". The `A` in `Scene{A}` takes the
 type of the Actor (technically the Actor's state) in the Scene.
 
-Note that this isn't the simplest possible use of Luvvy. For that we could
+Note that this isn't the simplest possible use of Actors.jl. For that we could
 just print "Hello, World!" in the `Genesis!` handler or use `delegate` to
 spawn a temporary actor (A `Stooge`) without defining it.
 
@@ -60,7 +68,7 @@ In effect, if you use the actor model liberally you no longer need be
 concerned about whether something should be asynchronous or executed in
 parallel, because everything generally is.
 
-Luvvy aims to make defining and calling messages easy. Making them as similar
+Actors.jl aims to make defining and calling messages easy. Making them as similar
 to ordinary method calls as possible while discouraging you from making
 various mistakes. The same goes for Actors themselves which you are encouraged
 to define and spawn liberally.
@@ -138,23 +146,12 @@ dependencies, so will probably require a separate module. However it should be
 fairly easy to use as having actors run in someone's browser connected by
 websockets is a very compelling use case.
 
-### Deliberate error propagation and handling
-
-Currently errors are propagated on an ad-hoc basis, mainly as an accident of
-how Channels work. We should formalise this and add some standard actors for
-handling errors e.g. A monitory which restarts actors when they fail for any
-reason.
-
-When a failure occurs repeatedly it may even be possible to block the message
-which triggers it and save the sequence for later examination.
-
 ## Alternatives
 
-- [Actors.jl](https://github.com/oschulz/Actors.jl)
+- Original [Actors.jl](https://github.com/oschulz/Actors.jl)
 
 ## References
 
-[^Etymology]: https://dictionary.cambridge.org/dictionary/english/luvvy
 [^Actors]: https://www.amazon.de/dp/026251141X/ref=sr_1_2?keywords=actor+model&qid=1571479272&sr=8-2
 [^Trio]: https://vorpus.org/blog/timeouts-and-cancellation-for-humans/#cancel-scopes-trio-s-human-friendly-solution-for-timeouts-and-cancellation
 
