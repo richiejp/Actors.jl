@@ -86,9 +86,30 @@ a significant improvement over naked exception handling.
 
 ## Current state of development
 
-This is really just an experiment at this stage however, you can presently
-create local Actors which run on multiple threads if you set
+You can presently create local Actors which run on multiple threads if you set
 `JULIA_THREADS`. The API will most likely change dramatically over time.
+
+### Error handling & Services
+
+Each actor has a 'minder', another actor that is notified if the first
+actor has a problem. A problem could be that an actor has died or something
+more general.
+
+Actor's have access to the address of their minder, so they can send it
+messages. This means the minder can be used to provide general services to all
+actors. For example, a minder actor can store the address of a logging
+actor. Any actor which uses that minder can send logging messages to it and
+the minder can forward them to a logger. This means any actor can use the
+logger without storing the logger's address in its state.
+
+Because minders are also actors, they themselves have a minder. This analogous
+to how, in most operating systems, child processes have parent
+processes. However, unlike processes, minders can form any type of graph,
+including those with loops or cycles in. An actor can even be its own minder,
+or you can have two actors which are each other's minders. This may be
+restricted in the future to avoid common errors.
+
+## Future developments
 
 Things that have not been tackled yet include:
 
