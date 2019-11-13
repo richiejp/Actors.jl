@@ -220,7 +220,9 @@ end
 
 enter!(s::Scene{<:AbsStage}, actor_state::S) where S = enter!(s, actor_state, Any)
 enter!(s::Scene{<:AbsStage}, actor_state::S, ::Type{M}) where {S, M} =
-    enter!(s, Actor{M}(actor_state, minder(s)))
+    enter!(s, actor_state, minder(s), M)
+enter!(s::Scene{<:AbsStage}, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
+    enter!(s, Actor{M}(actor_state, minder))
 
 function enter!(s::Scene{<:AbsStage}, actor::Actor)
     a = register!(s, actor)
@@ -259,7 +261,7 @@ struct PreGenesis!{T}
 end
 
 function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
-    logger = enter!(s, Logger())
+    logger = enter!(s, Logger(stdout))
     minder!(s, enter!(s, PassiveMinder(logger)))
 
     play = my(s).play = enter!(s, msg.play)
@@ -273,7 +275,7 @@ struct Entered!{S, M}
 end
 
 struct Enter!{S, M}
-    actor_state::S
+    actor::Actor{S, M}
     re::Union{Id, Nothing}
 end
 
@@ -315,7 +317,9 @@ hear(s::Scene{<:AbsStage}, msg::Leave!) = leave!(s)
 
 # Actors (Other than Stage)
 
-struct Logger end
+struct Logger{I <: IO}
+    io::I
+end
 
 struct LogDied!
     header::String
@@ -334,6 +338,25 @@ catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
     rethrow()
 end
+
+struct LogInfo!
+    from::Id
+    info::String
+end
+
+hear(s::Scene{Logger}, msg::LogInfo!) = try
+    state = my(s)
+
+    printstyled("Info"; bold=true, color=Base.info_color())
+    printstyled(" $(msg.from): "; color=:light_cyan)
+    println(msg.info)
+catch ex
+    @debug "Arhhgg; Logger died while trying to do its basic duty" ex
+    rethrow()
+end
+
+
+hear(s::Scene{Logger}
 
 struct PassiveMinder
     logger::Union{Id{Logger}, Nothing}
