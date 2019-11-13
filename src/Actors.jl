@@ -29,6 +29,7 @@ export Genesis!, Entered!, Enter!, Leave!
 # s   = Scene
 # Abs = Abstract
 # env = environment
+# m   = minder
 #
 # Avoid using any other abbreviations except in algorithms with a high level
 # of abstraction where the variables have no "common sense" meaning. You don't
@@ -75,7 +76,7 @@ my!(a::Id, state) = my_ref(a)[].state = state
 
 inbox(a::Id) = a.ref[].inbox
 minder(a::Id)::Id = my_ref(a)[].minder
-minder!(a::Id, minder::Id)::Id = my_ref(a)[].minder = minder
+minder!(a::Id, m::Id)::Id = my_ref(a)[].minder = m
 
 Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
@@ -109,7 +110,7 @@ my!(s::Scene, state) = my!(me(s), state)
 stage(s::Scene) = s.stage
 inbox(s::Scene) = inbox(me(s))
 minder(s::Scene) = minder(me(s))
-minder!(s::Scene, minder::Id) = minder!(me(s), minder)
+minder!(s::Scene, m::Id) = minder!(me(s), m)
 
 say(s::Scene, to::Id, msg) = if to.ref === nothing
     error("$to appears to be a remote actor; use shout instead")
@@ -218,12 +219,6 @@ function fork(fn::Function)
     schedule(task)
 end
 
-enter!(s::Scene{<:AbsStage}, actor_state::S) where S = enter!(s, actor_state, Any)
-enter!(s::Scene{<:AbsStage}, actor_state::S, ::Type{M}) where {S, M} =
-    enter!(s, actor_state, minder(s), M)
-enter!(s::Scene{<:AbsStage}, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
-    enter!(s, Actor{M}(actor_state, minder))
-
 function enter!(s::Scene{<:AbsStage}, actor::Actor)
     a = register!(s, actor)
     st = stage(s)
@@ -261,8 +256,8 @@ struct PreGenesis!{T}
 end
 
 function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
-    logger = enter!(s, Logger(stdout))
-    minder!(s, enter!(s, PassiveMinder(logger)))
+    logger = enter!(s, LoggerActor(stdout, me(s)))
+    minder!(s, enter!(s, Actor{Any}(PassiveMinder(logger), me(s))))
 
     play = my(s).play = enter!(s, msg.play)
     say(s, play, Genesis!())
@@ -279,12 +274,14 @@ struct Enter!{S, M}
     re::Union{Id, Nothing}
 end
 
-Enter!{M}(actor_state::S) where {S, M} = Enter!{S, M}(actor_state, nothing)
-
-enter!(s::Scene, actor_state::S) where S =
-    ask(s, stage(s), Enter!{S, Any}(actor_state, me(s)), Entered!{S, Any}).who
+enter!(s::Scene, actor_state::S) where S = enter!(s, actor_state, Any)
 enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
-    ask(s, stage(s), Enter!{S, M}(actor_state, me(s)), Entered!{S, M}).who
+    enter!(s, actor_state, minder(s), M)
+enter!(s::Scene, actor_state::S, minder::Id) where S =
+    enter!(s, actor_state, minder, Any)
+enter!(s::Scene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
+    ask(s, stage(s), Enter!(Actor{M}(actor_state, minder), me(s)),
+        Entered!{S, M}).who
 
 function hear(s::Scene{<:AbsStage}, msg::Enter!{S, M}) where {S, M}
     a = enter!(s, msg.actor_state, M)
@@ -321,6 +318,9 @@ struct Logger{I <: IO}
     io::I
 end
 
+LoggerActor(io::IO, minder::Id) =
+    Actor{Union{LogInfo!, LogDied!, Leave!}}(Logger(io), minder)
+
 struct LogDied!
     header::String
     died::Died!
@@ -355,9 +355,6 @@ catch ex
     rethrow()
 end
 
-
-hear(s::Scene{Logger}
-
 struct PassiveMinder
     logger::Union{Id{Logger}, Nothing}
 end
@@ -383,7 +380,9 @@ hear(s::Scene{Stooge}, ::Entered!{Stooge}) = let stooge = my(s)
 end
 
 delegate(action::Function, s::Scene, args...) =
-    say(s, stage(s), Enter!{Any}(Stooge(action, args)))
+    enter!(s, Stooge(action, args))
+delegate(action::Function, s::Scene, minder::Id, args...) =
+    enter!(s, Stooge(action, args), minder)
 
 struct Troupe
     as::Vector{Id}
