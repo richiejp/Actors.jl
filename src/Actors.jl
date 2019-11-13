@@ -183,6 +183,7 @@ function play!(s::Scene, env)
         let a = s.subject.ref[]
             @assert a.task === nothing "Actor is already playing"
             a.task = current_task()
+            a.task.sticky = true
         end
 
         prologue!(s, env)
