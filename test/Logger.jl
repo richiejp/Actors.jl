@@ -3,17 +3,13 @@ struct LoggerPlay
 end
 
 function hear(s::Scene{LoggerPlay}, ::Genesis!)
-    log = enter!(s, Logger(my(s).io))
+    log = enter!(s, Actors.Logger(my(s).io), Actors.LoggerMsgs)
+    mindy = enter!(s, Actors.PassiveMinder(log))
 
-    say(s, log, LogInfo!(me(s), "Noise"))
-
-    mindy = enter!(s, PassiveMinder(log))
-
-    delegate(s, mindy) do
+    delegate(s, mindy) do s
+        @say_info s "Noise"
         error("Drama")
     end
-
-    say(s, stage(s), Leave!())
 end
 
 @testset "Logger Test" begin

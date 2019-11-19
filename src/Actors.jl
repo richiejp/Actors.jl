@@ -8,10 +8,10 @@ export Stage, Troupe
 
 # Functions
 export genesis, stage, play!, enter!, leave!, ask, say, hear, me, my, my!
-export delegate, shout
+export delegate, shout, minder, @say_info
 
 # Messages
-export Genesis!, Entered!, Enter!, Leave!
+export Genesis!, Entered!, Enter!, Leave!, LogInfo!, Died!, Left!
 
 # _Naming Conventions_
 #
@@ -201,6 +201,7 @@ end
 epilogue!(s::Scene, env) = say(s, minder(s), Left!(me(s)))
 epilogue!(s::Scene{<:AbsStage}, env) = nothing
 dieing_breath!(s::Scene, ex, env) = let a = me(s)
+    @debug "$a Died" ex
     say(s, minder(s), Died!(a, my_ref(a)[]))
 end
 
@@ -280,11 +281,12 @@ enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
 enter!(s::Scene, actor_state::S, minder::Id) where S =
     enter!(s, actor_state, minder, Any)
 enter!(s::Scene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
-    ask(s, stage(s), Enter!(Actor{M}(actor_state, minder), me(s)),
-        Entered!{S, M}).who
+    enter!(s, Actor{M}(actor_state, minder))
+enter!(s::Scene, a::Actor{S, M}) where {S, M} =
+    ask(s, stage(s), Enter!(a, me(s)), Entered!{S, M}).who
 
-function hear(s::Scene{<:AbsStage}, msg::Enter!{S, M}) where {S, M}
-    a = enter!(s, msg.actor_state, M)
+function hear(s::Scene{<:AbsStage}, msg::Enter!)
+    a = enter!(s, msg.actor)
 
     if isnothing(msg.re)
         say(s, a, Entered!(a))
@@ -318,22 +320,19 @@ struct Logger{I <: IO}
     io::I
 end
 
-LoggerActor(io::IO, minder::Id) =
-    Actor{Union{LogInfo!, LogDied!, Leave!}}(Logger(io), minder)
-
 struct LogDied!
     header::String
     died::Died!
 end
 
-hear(s::Scene{Logger}, msg::LogDied!) = try
-    state = my(s)
+hear(s::Scene{<:Logger}, msg::LogDied!) = try
+    io = my(s).io
 
-    printstyled("Error: "; bold=true, color=Base.error_color())
-    printstyled(msg.header; color=Base.error_color())
-    println()
+    printstyled(io, "Error: "; bold=true, color=Base.error_color())
+    printstyled(io, msg.header; color=Base.error_color())
+    println(io)
     task = msg.died.corpse.task
-    showerror(stdout, task.exception, task.backtrace)
+    showerror(io, task.exception, task.backtrace)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
     rethrow()
@@ -341,39 +340,57 @@ end
 
 struct LogInfo!
     from::Id
+    mod::String
+    file::String
+    line::Int64
     info::String
 end
 
-hear(s::Scene{Logger}, msg::LogInfo!) = try
-    state = my(s)
+macro say_info(s, exp)
+    esc(:(say($s, minder($s),
+              LogInfo!(me($s), string(@__MODULE__), @__FILE__, @__LINE__, $exp))))
+end
 
-    printstyled("Info"; bold=true, color=Base.info_color())
-    printstyled(" $(msg.from): "; color=:light_cyan)
-    println(msg.info)
+hear(s::Scene{<:Logger}, msg::LogInfo!) = try
+    io = my(s).io
+
+    printstyled(io, "Info"; bold=true, color=Base.info_color())
+    printstyled(io, " $(msg.from): "; color=:light_cyan)
+    println(io, msg.info)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
     rethrow()
 end
 
-struct PassiveMinder
-    logger::Union{Id{Logger}, Nothing}
-end
+const LoggerMsgs = Union{LogInfo!, LogDied!, Leave!}
+LoggerActor(io::IO, minder::Id) = Actor{LoggerMsgs}(Logger(io), minder)
 
-hear(s::Scene{PassiveMinder}, msg::Left!) = nothing
-hear(s::Scene{PassiveMinder}, msg::Died!) = try
-    say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+abstract type AbsMinder end
+
+logger(s::Scene{<:AbsMinder}) = logger(my(s))
+
+hear(s::Scene{<:AbsMinder}, msg::Actors.LoggerMsgs) = say(s, logger(s), msg)
+hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
+hear(s::Scene{<:AbsMinder}, msg::Died!) = try
+    say(s, logger(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
     say(s, stage(s), msg)
 catch ex
-    @debug "Arrgg; PassiveMinder died while trying to do its basic duty" ex
+    @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
     rethrow()
 end
+
+struct PassiveMinder{L <: Id} <: AbsMinder
+    logger::Union{L, Nothing}
+end
+
+logger(m::PassiveMinder) = m.logger
 
 struct Stooge
     action::Function
     args::Tuple
 end
 
-hear(s::Scene{Stooge}, ::Entered!{Stooge}) = let stooge = my(s)
+listen!(s::Scene{Stooge}) = let stooge = my(s)
     stooge.action(s, stooge.args...)
 
     close(inbox(s))

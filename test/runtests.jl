@@ -34,6 +34,8 @@ end
     close(p.chnl)
 end
 
+include("Logger.jl")
+
 include("TestSet.jl")
 struct TestSetTest end
 
