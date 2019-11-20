@@ -355,7 +355,8 @@ hear(s::Scene{<:Logger}, msg::LogInfo!) = try
     io = my(s).io
 
     printstyled(io, "Info"; bold=true, color=Base.info_color())
-    printstyled(io, "[$(msg.from) $(msg.mod) $(msg.file):$(msg.line)] "; color=:light_cyan)
+    printstyled(io, "[$(msg.from) $(msg.mod) $(basename(msg.file)):$(msg.line)] ";
+                color=:light_cyan)
     println(io, msg.info)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
