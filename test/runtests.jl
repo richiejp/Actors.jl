@@ -50,6 +50,7 @@ end
     play!(TestSetTest())
 end
 
+include("Async.jl")
 include("Luvvies.jl")
 include("Stack.jl")
 include("TypedMessages.jl")

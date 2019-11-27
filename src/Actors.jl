@@ -8,10 +8,10 @@ export Stage, Troupe
 
 # Functions
 export genesis, stage, play!, enter!, leave!, ask, say, hear, me, my, my!
-export delegate, shout, minder, @say_info
+export delegate, shout, minder, @say_info, @try_async
 
 # Messages
-export Genesis!, Entered!, Enter!, Leave!, LogInfo!, Died!, Left!
+export Genesis!, Entered!, Enter!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
 
 # _Naming Conventions_
 #
@@ -418,6 +418,25 @@ shout(s::Scene, troupe::Id{Troupe}, msg) = say(s, troupe, Shout!(msg))
 
 hear(s::Scene{Troupe}, shout::Shout!) = for a in my(s).as
     say(s, a, shout.msg)
+end
+
+struct AsyncFail!
+    async::Task
+end
+
+hear(s::Scene, msg::AsyncFail!) = wait(msg.async)
+
+macro try_async(s, expr)
+    expr = quote
+        try
+            $expr
+        catch
+            say($s, me($s), AsyncFail!(current_task()))
+            rethrow()
+        end
+    end
+
+    esc(expr)
 end
 
 end # module
