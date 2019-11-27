@@ -46,7 +46,7 @@ function hear(s::Scene{TestSetTest}, ::Genesis!)
     say(s, stage(s), Leave!())
 end
 
-@testset LuvvyTestSet "TestSet Test" begin
+@testset LuvvyTestSet expect=1 "TestSet Test" begin
     play!(TestSetTest())
 end
 
