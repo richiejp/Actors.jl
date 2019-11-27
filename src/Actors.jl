@@ -347,16 +347,18 @@ struct LogInfo!
 end
 
 macro say_info(s, exp)
-    esc(:(say($s, minder($s),
-              LogInfo!(me($s), string(@__MODULE__), @__FILE__, @__LINE__, $exp))))
+    (mod, file, line) = Base.CoreLogging.@_sourceinfo
+    file = basename(file)
+    mod = string(mod)
+
+    esc(:(say($s, minder($s), LogInfo!(me($s), $mod, $file, $line, $exp))))
 end
 
 hear(s::Scene{<:Logger}, msg::LogInfo!) = try
     io = my(s).io
 
     printstyled(io, "Info"; bold=true, color=Base.info_color())
-    printstyled(io, "[$(msg.from) $(msg.mod) $(basename(msg.file)):$(msg.line)] ";
-                color=:light_cyan)
+    printstyled(io, " $(msg.from) $(msg.mod) $(msg.file):$(msg.line): "; color=:light_cyan)
     println(io, msg.info)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
