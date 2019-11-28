@@ -142,10 +142,13 @@ function listen!(s::Scene{<:AbsStage})
         hear(s, msg)
 
         if !isnothing(my(s).time_to_leave) && isempty(as)
+            @debug "All actors left on time"
             close(my(s).time_to_leave)
             close(inb)
         end
     end
+
+    @assert !isnothing(my(s).time_to_leave)
 end
 
 leave!(s::Scene) = close(inbox(s))
@@ -163,12 +166,18 @@ function leave!(s::Scene{<:AbsStage})
     my(s).time_to_leave = timer = Timer(3)
     @async begin
         wait(timer)
+        close(inbox(s))
+        @debug "$s Exit grace period over"
 
         for a in actors
+            @debug "$a took too long to leave, forcibly closing inbox..."
             close(inbox(a))
+            try
+                wait(a.ref[].task)
+            catch ex
+                @debug "$a Errored" ex
+            end
         end
-
-        close(inbox(s))
     end
 end
 
@@ -300,9 +309,8 @@ struct Left!
     who::Id
 end
 
-hear(s::Scene{Stage}, msg::Left!) = try
+function hear(s::Scene{Stage}, msg::Left!)
     wait(msg.who.ref[].task)
-finally
     delete!(my(s).actors, msg.who)
 end
 
@@ -311,7 +319,7 @@ struct Died!
     corpse::Actor
 end
 
-hear(s::Scene{<:AbsStage}, msg::Died!) = close(inbox(s))
+hear(s::Scene{<:AbsStage}, msg::Died!) = leave!(s)
 
 struct Leave! end
 
@@ -338,6 +346,7 @@ hear(s::Scene{<:Logger}, msg::LogDied!) = try
     println(io)
     task = msg.died.corpse.task
     showerror(io, task.exception, task.backtrace)
+    flush(io)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
     rethrow()
@@ -365,19 +374,21 @@ hear(s::Scene{<:Logger}, msg::LogInfo!) = try
     printstyled(io, "Info"; bold=true, color=Base.info_color())
     printstyled(io, " $(msg.from) $(msg.mod) $(msg.file):$(msg.line): "; color=:light_cyan)
     println(io, msg.info)
+    flush(io)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
     rethrow()
 end
 
-const LoggerMsgs = Union{LogInfo!, LogDied!, Leave!}
+const LogMsgs = Union{LogInfo!, LogDied!}
+const LoggerMsgs = Union{LogMsgs, Leave!}
 LoggerActor(io::IO, minder::Id) = Actor{LoggerMsgs}(Logger(io), minder)
 
 abstract type AbsMinder end
 
 logger(s::Scene{<:AbsMinder}) = logger(my(s))
 
-hear(s::Scene{<:AbsMinder}, msg::Actors.LoggerMsgs) = say(s, logger(s), msg)
+hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, logger(s), msg)
 hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
 hear(s::Scene{<:AbsMinder}, msg::Died!) = try
     say(s, logger(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
@@ -401,7 +412,7 @@ end
 listen!(s::Scene{Stooge}) = let stooge = my(s)
     stooge.action(s, stooge.args...)
 
-    close(inbox(s))
+    leave!(s)
 end
 
 delegate(action::Function, s::Scene, args...) =

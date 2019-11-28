@@ -1,5 +1,5 @@
 struct LoggerPlay
-    io::IOBuffer
+    io::IO
 end
 
 function hear(s::Scene{LoggerPlay}, ::Genesis!)
@@ -13,11 +13,13 @@ function hear(s::Scene{LoggerPlay}, ::Genesis!)
 end
 
 @testset "Logger Test" begin
-    io = IOBuffer()
+    io = Base.BufferStream()
 
     play!(LoggerPlay(io))
 
-    s = String(take!(io))
+    close(io)
+    s = String(take!(io.buffer))
+
     @test occursin("Noise", s)
     @test occursin("Drama", s)
 end
