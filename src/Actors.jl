@@ -131,18 +131,6 @@ function listen!(s::Scene)
     end
 end
 
-kill_all!(actors) = for a in actors
-    inb = inbox(a)
-
-    try
-        put!(inb, Leave!())
-    catch ex
-        ex isa InvalidStateException || rethrow()
-    finally
-        close(inb)
-    end
-end
-
 function listen!(s::Scene{<:AbsStage})
     inb = inbox(s)
     as = my(s).actors
@@ -162,11 +150,24 @@ end
 
 leave!(s::Scene) = close(inbox(s))
 function leave!(s::Scene{<:AbsStage})
-    kill_all!(my(s).actors)
+    actors = my(s).actors
 
-    my(s).time_to_leave = timer = Timer(1)
+    for a in actors
+        try
+            put!(inbox(a), Leave!())
+        catch ex
+            ex isa InvalidStateException || rethrow()
+        end
+    end
+
+    my(s).time_to_leave = timer = Timer(3)
     @async begin
         wait(timer)
+
+        for a in actors
+            close(inbox(a))
+        end
+
         close(inbox(s))
     end
 end
@@ -299,7 +300,11 @@ struct Left!
     who::Id
 end
 
-hear(s::Scene{Stage}, msg::Left!) = delete!(my(s).actors, msg.who)
+hear(s::Scene{Stage}, msg::Left!) = try
+    wait(msg.who.ref[].task)
+finally
+    delete!(my(s).actors, msg.who)
+end
 
 struct Died!
     who::Id
