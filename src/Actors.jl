@@ -428,7 +428,7 @@ hear(s::Scene, msg::AsyncFail!) = wait(msg.async)
 
 macro try_async(s, expr)
     expr = quote
-        try
+        @async try
             $expr
         catch
             say($s, me($s), AsyncFail!(current_task()))

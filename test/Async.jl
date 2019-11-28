@@ -3,7 +3,7 @@ struct AsyncTestMinder <: Actors.AbsMinder end
 const ERROR_MSG = "Error Message"
 
 function hear(s::Scene{AsyncTestMinder}, msg::Died!)
-    @test msg.corpse.task.exception.msg == ERROR_MSG
+    @test msg.corpse.task.exception.task.exception.msg == ERROR_MSG
 
     say(s, stage(s), msg)
 end
