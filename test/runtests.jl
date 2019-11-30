@@ -2,6 +2,16 @@ using Test
 using Actors
 import Actors: hear
 
+# We really want to test with true concurrency. Even if we are only running in
+# a VM with one vCPU (i.e. Gitlab CI), we are more likely to see errors with
+# atleast two OS threads. Unfortunately Julia limits the number of threads to
+# the CPU count though.
+if Sys.CPU_THREADS > 1
+    @assert Threads.nthreads() > 1 "Set environment variable JULIA_NUM_THREADS to > 1"
+else
+    @warn "Only testing with one thread"
+end
+
 # Sanity check without using our custom TestSet
 "Our Play"
 struct HelloWorld
