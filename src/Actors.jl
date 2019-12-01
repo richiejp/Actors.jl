@@ -1,5 +1,7 @@
 module Actors
 
+using DocStringExtensions
+
 # Misc Types
 export Id, Scene
 
@@ -47,17 +49,68 @@ export Genesis!, Entered!, Enter!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
 #
 # Types/Structs which are messages have a bang attached (e.g. Leave!)
 
+@template TYPES = """
+$DOCSTRING
+
+### Members
+
+$TYPEDFIELDS
+"""
+
+@template (FUNCTIONS, METHODS, MACROS) = """
+$DOCSTRING
+
+### Signatures
+
+$TYPEDSIGNATURES
+"""
+
+"""The star of the show (but not really)
+
+This holds internal state for an Actor, it wraps the user defined state
+value. We usually think of the Actor as being the state value rather than this
+structure which is mostely hidden. It is rare that a user will need to access
+this directly. Usually Actors are referenced by an [`Id`](@ref) and we get the
+actor's details by calling accessor functions on either the `Id` or the
+[`Scene`](@ref).
+
+If you do access this, then you need to be careful to avoid concurrency
+violations.
+
+### Type Parameters
+
+- `S` The type of the user defined actor state.
+- `M` The message types the actor accepts, usually Any.
+
+It is rare to set `M`, but if it is set then it should include at least
+[`Leave!`](@ref).
+"""
 mutable struct Actor{S, M}
+    "How the Actor recieves messages, see [`listen!`](@ref)"
     inbox::Channel{M}
+    "An arbitrary value which is usually thought of as the Actor"
     state::S
+    "The Task this actor runs/ran in"
     task::Union{Task, Nothing}
+    "The `Id` of another actor which will manages and supports this actor"
     minder
 end
 
+"Create an Actor with the given state and minder"
 Actor{M}(data, minder) where M = Actor(Channel{M}(420), data, nothing, minder)
 
+"""The Address of an [`Actor`](@ref)
+
+This is a safe reference to an [`Actor`](@ref). It is most commonly used to
+send messages to an [`Actor`](@ref). However many accessor methods take an
+`Id` to safely get or set some `Actor`'s internals or associated data.
+
+In theory atleast, one `Actor` can have multiple addresses.
+"""
 struct Id{S, M}
+    "The Address"
     i::UInt64
+    "A reference to the actor value, usually accessed with [`my_ref`](@ref)"
     ref::Union{Ref{Actor{S, M}}, Nothing}
 end
 
