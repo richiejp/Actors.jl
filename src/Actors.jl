@@ -105,7 +105,12 @@ This is a safe reference to an [`Actor`](@ref). It is most commonly used to
 send messages to an [`Actor`](@ref). However many accessor methods take an
 `Id` to safely get or set some `Actor`'s internals or associated data.
 
-In theory atleast, one `Actor` can have multiple addresses.
+!!! note
+
+    One `Actor` should be able to have multiple addresses and the `Actor` an
+    address points to should be mutable. However this needs more work, so
+    expect address handling to change.
+
 """
 struct Id{S, M}
     "The Address"
@@ -116,6 +121,11 @@ end
 
 Base.:(==)(a::Id, b::Id) = a.i == b.i
 
+"""Get a reference to [`Actor`](@ref)'s self
+
+Will throw an exception if called from a task other than the one which the
+`Actor` was started on. It is rare for the user to access this directly.
+"""
 function my_ref(a::Id)
     @assert a.ref !== nothing "Trying to get a remote actor's state"
     @assert a.ref[].task !== nothing "Actor is not playing"
@@ -124,7 +134,24 @@ function my_ref(a::Id)
     a.ref
 end
 
+"""Safely get the current [`Actor`](@ref)'s state
+
+Usually the user passes the [`Scene`](@ref) to this and gets the executing
+[`Actor`](@ref)'s state in return.
+"""
 my(a::Id) = my_ref(a)[].state
+
+"""Set the current [`Actor`](@ref)'s state
+
+The inverse of [`my`](@ref); it is currently useful when the state type is
+immutable.
+
+!!! note
+
+    In the future, if messages are handled in parallel, then this could signal
+    that the next message may start to be processed.
+
+"""
 my!(a::Id, state) = my_ref(a)[].state = state
 
 inbox(a::Id) = a.ref[].inbox
