@@ -107,9 +107,9 @@ send messages to an [`Actor`](@ref). However many accessor methods take an
 
 !!! note
 
-    One `Actor` should be able to have multiple addresses and the `Actor` an
-    address points to should be mutable. However this needs more work, so
-    expect address handling to change.
+    One `Actor` should be able to have multiple addresses and the `Actor`
+    an address points to should be mutable. However this needs more work,
+    so expect address handling to change.
 
 """
 struct Id{S, M}
@@ -150,23 +150,67 @@ immutable.
 
     In the future, if messages are handled in parallel, then this could signal
     that the next message may start to be processed.
-
 """
 my!(a::Id, state) = my_ref(a)[].state = state
 
+"""Get the inbox of an [`Actor`](@ref)
+
+Useful when overriding functions such as [`listen!`](@ref) or
+[`leave!`](@ref). Otherwise it is quite unusual for the user to call
+this.
+"""
 inbox(a::Id) = a.ref[].inbox
+
+"""Get the address of an [`Actor`](@ref)'s minder
+
+When called on the [`Scene`](@ref) it will get the current Actor's minder. If
+called on an [`Id`](@ref) it will get the minder of the Actor pointed to by
+the address.
+
+See [`AbsMinder`](@ref).
+
+"""
 minder(a::Id)::Id = my_ref(a)[].minder
+
+"""Set the [`Actor`](@ref)'s minder
+
+Inverse of [`minder`](@ref).
+"""
 minder!(a::Id, m::Id)::Id = my_ref(a)[].minder = m
 
 Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
+"""Abstract Stage
+
+Mainly used to allow overriding of [`Stage`](@ref)'s methods.
+"""
 abstract type AbsStage end
 
+"""The Root Actor
+
+This contains the addresses for all the actors and bootstraps the
+`play`. Currently all actors are created by sending messages to the `Stage`
+although this will probably change in the future.
+
+Any messages which the `Stage` can not handle, it forwards to the `play`.
+
+The `Stage` bootstraps itself by putting the [`PreGenesis!`](@ref) message in
+its [`inbox`](@ref). It processes this message first then sends
+[`Genesis!`](@ref) to the actor specified by [`play!`](@ref).
+
+It is unusual for the user to access this directly or override its
+behaviour. Most things can be achieved by creating a new [`AbsMinder`](@ref)
+type or allowing messages to be forwarded to the Play actor.
+"""
 mutable struct Stage <: AbsStage
+    "All the `Actor`s in the play"
     actors::Set{Id}
+    "Grace period timer before force leaving"
     time_to_leave::Union{Timer, Nothing}
+    "User defined play `Actor`"
     play::Id
 
+    "Create a new [`Stage`](@ref) with `play` state (not `Id`)"
     function Stage(play)
         st = new(Set{Id}(), nothing)
         actor = Actor{Any}(st, Id{Nothing, Nothing}(UInt64(0), nothing))
@@ -179,19 +223,49 @@ mutable struct Stage <: AbsStage
     end
 end
 
+"""The context of message processing
+
+Contains common information which is used by many different methods during
+message handling. You should assume that the members of this struct are likely
+to change.
+
+### Type Parameters
+
+- `S` The type of the current [`Actor`](@ref)'s state. This is commonly
+  specified when adding a method for [`hear`](@ref) (amongst much else).
+
+- `M` The message types accepted by the current `Actor`, usually `Any`.
+
+"""
 struct Scene{S, M}
+    "The address of the current [`Actor`](@ref)"
     subject::Id{S, M}
+    "The [`Stage`](@ref)"
     stage::Id{Stage, Any}
 end
 
+"Get the address ([`Id`](@ref)) of the current [`Actor`](@ref)"
 me(s::Scene) = s.subject
 my(s::Scene) = my(me(s))
 my!(s::Scene, state) = my!(me(s), state)
+
+"Get the address ([`Id`](@ref)) of the [`Stage`](@ref)"
 stage(s::Scene) = s.stage
 inbox(s::Scene) = inbox(me(s))
 minder(s::Scene) = minder(me(s))
 minder!(s::Scene, m::Id) = minder!(me(s), m)
 
+"""Send a message asynchronously
+
+This returns immediately and doesn't guarantee the message is processed by the
+actor specified by `to`. Nor does it guarantee messages will be delivered in
+the order `say` is called.
+
+This may throw an error if, for example, `to` only accepts certain message
+types.
+
+This doesn't expect a response from `to`. For that see [`ask`](@ref).
+"""
 say(s::Scene, to::Id, msg) = if to.ref === nothing
     error("$to appears to be a remote actor; use shout instead")
 else
