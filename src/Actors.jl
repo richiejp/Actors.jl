@@ -273,8 +273,35 @@ else
     put!(inbox(to), msg)
 end
 
+"""Handle a received message
+
+Usually called by [`listen!`](@ref) to handle a message taken from the
+[`inbox`](@ref). The user defines new `hear` methods to handle messages for
+different [`Actor`](@ref)-message type combinations.
+
+It is passed a [`Scene`](@ref) object which has the [`Actor`](@ref) state type
+as the first type parameter. By convention this argument is always called `s`,
+if you use a different name it may break some non-essential macros. The other
+parameter is the message, which is usually called `msg`, unless you have a
+more appropriate name, and can be of any type (in a local system).
+
+If `hear` returns a value it will most likely be ignored (unless you override
+[`listen!`](@ref)). If you need to respond to a message then use [`say`](@ref)
+or [`ask`](@ref).
+"""
 hear(s::Scene{<:AbsStage}, msg) = say(s, my(s).play, msg)
 
+"""Take messages from the [`inbox`](@ref) and process them
+
+By default this simply takes messages from the [`inbox`](@ref) and calls
+[`hear`](@ref) on them. However you may wish to process some messages
+specially or do some work inbetween messages, in which case you can override
+this for a given [`Actor`](@ref) type.
+
+As a general rule, you should make sure to call [`hear`](@ref) on a message if
+you can't process it some other way. Otherwise you will prevent some standard
+messages from working (such as [`Leave!`](@ref)).
+"""
 function listen!(s::Scene)
     @debug "$s listening"
 
