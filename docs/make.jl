@@ -6,5 +6,10 @@ using Actors
 makedocs(
     sitename = "Actors",
     format = Documenter.HTML(),
-    modules = [Actors]
+    modules = [Actors],
+    pages = [
+        "Guide" => "index.md",
+        "Reference" => "reference.md",
+        "Contributing" => "contributing.md"
+    ]
 )

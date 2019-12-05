@@ -37,12 +37,31 @@ underscores for everything else.
 
 ### Functions
 
-Use the short form of functions wherever possible. Define the parameter types
-wherever practical. Functions which necessarily modify an [`Actors.Actor`](@ref)'s
-state should have a bang `!` attached.
+Use the short form of functions wherever possible (i.e. `fn() = ...`). Define
+the argument types wherever practical, however do try to allow the user to
+override your methods. For example use `hear(s::Scene{<:AbsStage}) = ...`,
+instead of `hear(s::Scene{Stage}) = ...`. Note that the `<:` is necessary so
+that the parameter `S` of `Scene{S}` can take a concrete type value at compile
+time which derives from `AbsStage`. Otherwise it will result in dynamic typing.
+
+Functions which necessarily modify an [`Actors.Actor`](@ref)'s state should
+have a bang `!` attached.
+
+Avoid functions with large numbers of parameters (i.e. more than 5),
+especially optional parameters. Create a new type to encapsulate them or find
+some other way.
 
 ### Message types
 
-Types/Structs which are messages have a bang attached (e.g. [`Leave!`](@ref))
+Types/Structs which are primarily intended as messages have a bang attached
+(e.g. [`Leave!`](@ref)).
 
-### Whitespace and Newlines
+### Whitespace
+
+Indentation is 4 spaces and several layers of indentation sould be
+avoided. Ideally lines should be no longer than 80 characters, but there is no
+hard upper limit.
+
+In general code is grouped into small semi-logical blocks, seperated by a new
+line. Sometimes this coincides with actual control or block statements, like
+`if..else` or `try`, but not always.
