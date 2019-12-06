@@ -60,7 +60,8 @@ Note that this isn't the simplest possible use of Actors.jl. For that we could
 just print "Hello, World!" in the `Genesis!` handler or use `delegate` to
 spawn a temporary actor (A `Stooge`) without defining it.
 
-See `test/runtest.jl` for more examples.
+See `test/runtest.jl` for more examples. Also see the
+[documentation](https://palethorpe.gitlab.io/Actors.jl/).
 
 ## More spiel
 

@@ -132,4 +132,4 @@ The [`Stage`](@ref) is passed `StopwatchPlay` which it turns into an
 variable which has our play actor as the type parameter. In any other framework
 this would be called the 'context'.
 
-The majority of the Actors.jl's API takes `s` as the first argument.
+The majority of the Actors.jl's API takes `s::Scene` as the first argument.
