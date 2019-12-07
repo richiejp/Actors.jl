@@ -132,4 +132,25 @@ The [`Stage`](@ref) is passed `StopwatchPlay` which it turns into an
 variable which has our play actor as the type parameter. In any other framework
 this would be called the 'context'.
 
-The majority of the Actors.jl's API takes `s::Scene` as the first argument.
+The majority of the Actors.jl's API takes `s::Scene` as the first
+argument. This allows us to get commonly needed information about the actor
+system and current actor. It is recommended to always call this variable `s`,
+so that you have the option of using unhygenic macros which implicitly use
+this information.
+
+The [`my!`](@ref) accessor method allows us to update the actor
+state. `StopwatchPlay` is immutable, so we can't do `my(s).i = 1`.
+
+!!! note
+
+    Because `StopwatchPlay` only contains a plain bit type `Int`, it is therefor a
+    plain bit type itself. If we make it immutable then it becomes something quite
+    different. As a general rule it is better for performance and safety if
+    your data is made up of immutable types, in particular plain bit types. Especially
+    if this data is passed between actors allowing you to accidentally access
+    the safe reference in two different threads.
+
+The [`@say_info`](@ref) macro sends a message to an automatically created
+actor which logs messages to stdout. Finally we send [`Leave!`](@ref) to the
+[`Stage`](@ref) actor which then propagates this to all other actors and
+shutsdown the actor system.

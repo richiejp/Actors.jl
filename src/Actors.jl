@@ -575,6 +575,10 @@ hear(s::Scene{<:AbsStage}, msg::Leave!) = leave!(s)
 
 # Actors (Other than Stage)
 
+"""An [`Actor`](@ref) which prints messages to an `IO` stream
+
+By default one of these is created which writes to stdout exlusively.
+"""
 struct Logger{I <: IO}
     io::I
 end
@@ -606,6 +610,11 @@ struct LogInfo!
     info::String
 end
 
+"""Print an info message
+
+Uses the [`Logger`](@ref) provided by [`minder`](@ref) to print some
+informational text.
+"""
 macro say_info(s, exp)
     (mod, file, line) = Base.CoreLogging.@_sourceinfo
     file = basename(file)
