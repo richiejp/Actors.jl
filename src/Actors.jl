@@ -65,6 +65,8 @@ end
 "Create an Actor with the given state and minder"
 Actor{M}(data, minder) where M = Actor(Channel{M}(420), data, nothing, minder)
 
+include("addressing.jl")
+
 """The Address of an [`Actor`](@ref)
 
 This is a safe reference to an [`Actor`](@ref). It is most commonly used to

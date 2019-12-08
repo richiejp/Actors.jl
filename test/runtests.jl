@@ -12,6 +12,8 @@ else
     @warn "Only testing with one thread"
 end
 
+include("addressing.jl")
+
 # Sanity check without using our custom TestSet
 "Our Play"
 struct HelloWorld
