@@ -13,7 +13,7 @@ export stage, play!, enter!, leave!, ask, say, hear, me, my, my!
 export delegate, shout, minder, @say_info, @try_async
 
 # Messages
-export Genesis!, Entered!, Enter!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
+export Genesis!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
 
 @template TYPES = """
 $DOCSTRING
@@ -30,6 +30,39 @@ $DOCSTRING
 
 $TYPEDSIGNATURES
 """
+
+"""The Address of an [`Actor`](@ref)
+
+This is a safe reference to an [`Actor`](@ref). It is most commonly used to
+send messages to an [`Actor`](@ref). However many accessor methods take an
+`Addr` to safely get or set some `Actor`'s internals or associated data.
+
+!!! warning
+
+    This will grow in size as remote actors are added.
+
+### Type Parameters
+
+- `S` The type of the actor state.
+- `M` The message types the actor accepts, usually Any.
+
+"""
+struct Id{S, M}
+    "The local index within the owning stage"
+    inner::UInt32
+
+    Id(inner) = Id{Any, Any}(inner)
+    Id{S}(inner) where S = Id{S, Any}(inner)
+    function Id{S, M}(inner) where {S, M}
+        @assert inner > 0 && inner <= typemax(UInt32)
+
+        Id{S, M}(UInt32(inner))
+    end
+    Id{S, M}(inner::UInt32) where {S, M} = new{S, M}(inner)
+end
+
+Base.:(==)(a::Id, b::Id) = a.inner == b.inner
+Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
 """The star of the show (but not really)
 
@@ -54,99 +87,20 @@ It is rare to set `M`, but if it is set then it should include at least
 mutable struct Actor{S, M}
     "How the Actor recieves messages, see [`listen!`](@ref)"
     inbox::Channel{M}
-    "An arbitrary value which is usually thought of as the Actor"
+    "An arbitrary value which is usually thought of as the actor"
     state::S
     "The Task this actor runs/ran in"
     task::Union{Task, Nothing}
-    "The `Id` of another actor which will manages and supports this actor"
-    minder
+    "The `Id` of another actor which manages and supports this actor"
+    minder::Id
+    "The cannonical `Id` of this `Actor`"
+    me::Id{S, M}
 end
 
 "Create an Actor with the given state and minder"
 Actor{M}(data, minder) where M = Actor(Channel{M}(420), data, nothing, minder)
 
 include("addressing.jl")
-
-"""The Address of an [`Actor`](@ref)
-
-This is a safe reference to an [`Actor`](@ref). It is most commonly used to
-send messages to an [`Actor`](@ref). However many accessor methods take an
-`Id` to safely get or set some `Actor`'s internals or associated data.
-
-!!! note
-
-    One `Actor` should be able to have multiple addresses and the `Actor`
-    an address points to should be mutable. However this needs more work,
-    so expect address handling to change.
-
-"""
-struct Id{S, M}
-    "The Address"
-    i::UInt64
-    "A reference to the actor value, usually accessed with [`my_ref`](@ref)"
-    ref::Union{Ref{Actor{S, M}}, Nothing}
-end
-
-Base.:(==)(a::Id, b::Id) = a.i == b.i
-
-"""Get a reference to [`Actor`](@ref)'s self
-
-Will throw an exception if called from a task other than the one which the
-`Actor` was started on. It is rare for the user to access this directly.
-"""
-function my_ref(a::Id)
-    @assert a.ref !== nothing "Trying to get a remote actor's state"
-    @assert a.ref[].task !== nothing "Actor is not playing"
-    @assert a.ref[].task === current_task() "Trying to get another actor's state"
-
-    a.ref
-end
-
-"""Safely get the current [`Actor`](@ref)'s state
-
-Usually the user passes the [`Scene`](@ref) to this and gets the executing
-[`Actor`](@ref)'s state in return.
-"""
-my(a::Id) = my_ref(a)[].state
-
-"""Set the current [`Actor`](@ref)'s state
-
-The inverse of [`my`](@ref); it is currently useful when the state type is
-immutable.
-
-!!! note
-
-    In the future, if messages are handled in parallel, then this could signal
-    that the next message may start to be processed.
-"""
-my!(a::Id, state) = my_ref(a)[].state = state
-
-"""Get the inbox of an [`Actor`](@ref)
-
-Useful when overriding functions such as [`listen!`](@ref) or
-[`leave!`](@ref). Otherwise it is quite unusual for the user to call
-this.
-"""
-inbox(a::Id) = a.ref[].inbox
-
-"""Get the address of an [`Actor`](@ref)'s minder
-
-When called on the [`Scene`](@ref) it will get the current Actor's minder. If
-called on an [`Id`](@ref) it will get the minder of the Actor pointed to by
-the address.
-
-See [`AbsMinder`](@ref).
-
-"""
-minder(a::Id)::Id = my_ref(a)[].minder
-
-"""Set the [`Actor`](@ref)'s minder
-
-Inverse of [`minder`](@ref).
-"""
-minder!(a::Id, m::Id)::Id = my_ref(a)[].minder = m
-
-Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
 
 """Abstract Stage
 
@@ -172,7 +126,8 @@ type or allowing messages to be forwarded to the Play actor.
 """
 mutable struct Stage <: AbsStage
     "All the `Actor`s in the play"
-    actors::Set{Id}
+    actors::Set{Actor}
+    ids::AddressBook
     "Grace period timer before force leaving"
     time_to_leave::Union{Timer, Nothing}
     "User defined play `Actor`"
@@ -180,12 +135,12 @@ mutable struct Stage <: AbsStage
 
     "Create a new [`Stage`](@ref) with `play` state (not `Id`)"
     function Stage(play)
-        st = new(Set{Id}(), nothing)
-        actor = Actor{Any}(st, Id{Nothing, Nothing}(UInt64(0), nothing))
-        a = Id(UInt64(0), Ref(actor))
-        actor.minder = a
+        st = new(Set{Id}(), AddressBook(), nothing)
+        id = Id{Stage}(UInt32(0))
+        a = Actor{Any}(st, id)
+        a.me = id
 
-        put!(inbox(a), PreGenesis!(play))
+        put!(actor.inbox, PreGenesis!(play))
 
         a
     end
@@ -206,20 +161,80 @@ to change.
 
 """
 struct Scene{S, M}
-    "The address of the current [`Actor`](@ref)"
-    subject::Id{S, M}
+    "The current [`Actor`](@ref)"
+    subject::Actor{S, M}
     "The [`Stage`](@ref)"
-    stage::Id{Stage, Any}
+    stage::Stage
 end
+
+scene_checks(s::Scene) = let a = s.subject
+    @assert a.task !== nothing "Actor is not playing"
+    @assert a.task === current_task() "Trying to get another actor's state"
+end
+
+"""Safely get the current [`Actor`](@ref)'s state
+
+Usually the user passes the [`Scene`](@ref) to this and gets the executing
+[`Actor`](@ref)'s state in return.
+"""
+function my(s::Scene)
+    scene_checks(s)
+    s.subject.state
+end
+
+"""Set the current [`Actor`](@ref)'s state
+
+The inverse of [`my`](@ref); it is currently useful when the state type is
+immutable.
+
+!!! note
+
+    In the future, if messages are handled in parallel, then this could signal
+    that the next message may start to be processed.
+"""
+function my!(s::Scene, state)
+    scene_checks(s)
+    s.subject.state = state
+end
+
+"""Get the inbox of an [`Actor`](@ref)
+
+Useful when overriding functions such as [`listen!`](@ref) or
+[`leave!`](@ref). Otherwise it is quite unusual for the user to call
+this.
+"""
+function inbox(s::Scene, a::Id)
+    scene_checks(s)
+    s.stage.book[a].inbox
+end
+
+function inbox(s::Scene)
+    scene_checks(s)
+    s.subject.inbox
+end
+
+"""Get the address of an [`Actor`](@ref)'s minder
+
+When called on the [`Scene`](@ref) it will get the current Actor's minder. If
+called on an [`Id`](@ref) it will get the minder of the Actor pointed to by
+the address.
+
+See [`AbsMinder`](@ref).
+
+"""
+minder(s::Scene, a::Id)::Id
+
+"""Set the [`Actor`](@ref)'s minder
+
+Inverse of [`minder`](@ref).
+"""
+minder!(a::Id, m::Id)::Id = my_ref(a)[].minder = m
 
 "Get the address ([`Id`](@ref)) of the current [`Actor`](@ref)"
 me(s::Scene) = s.subject
-my(s::Scene) = my(me(s))
-my!(s::Scene, state) = my!(me(s), state)
 
 "Get the address ([`Id`](@ref)) of the [`Stage`](@ref)"
 stage(s::Scene) = s.stage
-inbox(s::Scene) = inbox(me(s))
 minder(s::Scene) = minder(me(s))
 minder!(s::Scene, m::Id) = minder!(me(s), m)
 
@@ -352,8 +367,8 @@ are typically shared amongst threads.
 """
 capture_environment(::Id) = nothing
 
-play!(play) = let st = Stage(play)
-    play!(Scene(st, st), capture_environment(st))
+play!(play) = let a = Stage(play)
+    play!(Scene(a, a.state), capture_environment(a.me))
 end
 
 """Ran before [`listen!`](@ref)
@@ -427,19 +442,18 @@ internals. It is passed `env` which is taken by [`capture_environment`](@ref).
 
 See [`enter!`](@ref) and [`play!`](@ref).
 """
-dieing_breath!(s::Scene, ex, env) = let a = me(s)
-    @debug "$a Died" ex
-    say(s, minder(s), Died!(a, my_ref(a)[]))
+function dieing_breath!(s::Scene, ex, env)
+    @debug "$(me(s)) Died" ex
+    say(s, minder(s), Died!(me(s), s.subject))
 end
 
 "Create an address [`Id`](@ref) for an [`Actor`](@ref) and add it to the [`Stage`](@ref)"
-function register!(s::Scene{<:AbsStage}, actor::Actor)::Id
-    as = my(s).actors
-    a = Id(UInt64(length(as) + 1), Ref(actor))
+function register!(s::Scene{<:AbsStage}, a::Actor)::Id
+    stage = my(s)
 
-    push!(as, a)
+    push!(stage.actors, a)
 
-    a
+    a.me = push!(stage.book, a)
 end
 
 "Create a new Task, Thread or similar primitive"
@@ -449,15 +463,23 @@ function fork(fn::Function)
     schedule(task)
 end
 
+enter!(s::Scene, actor_state::S) where S = enter!(s, actor_state, Any)
+enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
+    enter!(s, actor_state, minder(s), M)
+enter!(s::Scene, actor_state::S, minder::Id) where S =
+    enter!(s, actor_state, minder, Any)
+enter!(s::Scene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
+    enter!(s, Actor{M}(actor_state, minder))
+
 "Add a new [`Actor`](@ref) to the [`Stage`](@ref)/Play and return its [`Id`](@ref)"
-function enter!(s::Scene{<:AbsStage}, actor::Actor)
-    a = register!(s, actor)
+function enter!(s::Scene, a::Actor{S, M}) where {S, M}
+    id = register!(s, a)
     st = stage(s)
-    env = capture_environment(st)
+    env = capture_environment(id)
 
     fork(() -> play!(Scene(a, st), env))
 
-    a
+    id
 end
 
 """Like [`say`](@ref), but wait for a response of a given type `R`
@@ -512,40 +534,6 @@ end
 
 "Sent to the users 'play' [`Actor`](@ref) to get things started"
 struct Genesis! end
-
-"Informs that an [`Actor`](@ref) has entered the [`Stage`](@ref)"
-struct Entered!{S, M}
-    "The new `Actor`"
-    who::Id{S, M}
-end
-
-"Tell [`Stage`](@ref) to add a new [`Actor`](@ref)"
-struct Enter!{S, M}
-    "The `Actor` to add"
-    actor::Actor{S, M}
-    "Who to tell the new `Actor` [`Id`](@ref) to"
-    re::Union{Id, Nothing}
-end
-
-enter!(s::Scene, actor_state::S) where S = enter!(s, actor_state, Any)
-enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
-    enter!(s, actor_state, minder(s), M)
-enter!(s::Scene, actor_state::S, minder::Id) where S =
-    enter!(s, actor_state, minder, Any)
-enter!(s::Scene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
-    enter!(s, Actor{M}(actor_state, minder))
-enter!(s::Scene, a::Actor{S, M}) where {S, M} =
-    ask(s, stage(s), Enter!(a, me(s)), Entered!{S, M}).who
-
-function hear(s::Scene{<:AbsStage}, msg::Enter!)
-    a = enter!(s, msg.actor)
-
-    if isnothing(msg.re)
-        say(s, a, Entered!(a))
-    else
-        say(s, msg.re, Entered!(a))
-    end
-end
 
 "Informs that an [`Actor`](@ref) left"
 struct Left!

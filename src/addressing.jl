@@ -1,27 +1,3 @@
-"""The Address of an [`Actor`](@ref)
-
-This is a safe reference to an [`Actor`](@ref). It is most commonly used to
-send messages to an [`Actor`](@ref). However many accessor methods take an
-`Id` to safely get or set some `Actor`'s internals or associated data.
-
-!!! note
-
-    This will grow in size as remote actors are added.
-
-"""
-struct Addr
-    "The local index within the owning stage"
-    inner::UInt32
-
-    Addr(inner::UInt32) = new(inner)
-    function Addr(inner)
-        @assert inner > 0 && inner <= typemax(UInt32)
-
-        new(UInt32(inner))
-    end
-
-end
-
 struct AddressTable
     readers::Threads.Atomic{UInt}
     entries::Vector{Union{Actor, Nothing}}
@@ -41,7 +17,7 @@ AddressBook() = AddressBook(ReentrantLock(), Threads.Atomic{UInt}(),
 atomic_inc!(atom::Threads.Atomic{T}) where T = Threads.atomic_add!(atom, T(1))
 atomic_dec!(atom::Threads.Atomic{T}) where T = Threads.atomic_sub!(atom, T(1))
 
-function Base.getindex(book::AddressBook, id::Addr)
+function Base.getindex(book::AddressBook, id::Id)
     retry = 100
     flips = 0
     flop = 0
@@ -88,13 +64,13 @@ function Base.push!(book::AddressBook, a::Actor)
 
         push!(book.live[flop].entries, a)
 
-        Addr(UInt32(i))
+        Id(UInt32(i))
     finally
         unlock(book.write_lock)
     end
 end
 
-function Base.setindex!(book::AddressBook, a::Union{Actor, Nothing}, id::Addr)
+function Base.setindex!(book::AddressBook, a::Union{Actor, Nothing}, id::Id)
     retry = 4096
 
     lock(book.write_lock)
