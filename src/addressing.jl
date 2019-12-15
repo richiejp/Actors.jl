@@ -1,9 +1,10 @@
 struct AddressTable
     readers::Threads.Atomic{UInt}
     entries::Vector{Union{Actor, Nothing}}
+    rev_entries::IdDict{Actor, Set{UInt32}}
 end
 
-AddressTable() = AddressTable(Threads.Atomic{UInt}(), [])
+AddressTable() = AddressTable(Threads.Atomic{UInt}(), [], IdDict{Actor, Set{UInt32}}())
 
 struct AddressBook
     write_lock::ReentrantLock
@@ -17,7 +18,7 @@ AddressBook() = AddressBook(ReentrantLock(), Threads.Atomic{UInt}(),
 atomic_inc!(atom::Threads.Atomic{T}) where T = Threads.atomic_add!(atom, T(1))
 atomic_dec!(atom::Threads.Atomic{T}) where T = Threads.atomic_sub!(atom, T(1))
 
-function Base.getindex(book::AddressBook, id::Id)
+function read_lock(fn::Function, book::AddressBook)
     retry = 100
     flips = 0
     flop = 0
@@ -35,68 +36,95 @@ function Base.getindex(book::AddressBook, id::Id)
     retry > 0 || error("Could not do address lookup due to contention")
 
     try
-        book.live[flop].entries[id.inner]
+        fn(book.live[flop])
     finally
         atomic_dec!(book.live[flop].readers)
     end
 end
 
-function Base.push!(book::AddressBook, a::Actor)
+Base.getindex(book::AddressBook, id::Id) = read_lock(book) do table
+    table.entries[id.inner]
+end
+
+Base.getindex(book::AddressBook, a::Actor) = read_lock(book) do table
+    collect(table.rev_entries[a])
+end
+
+Base.isempty(book::AddressBook) = read_lock(book) do table
+    isempty(table.rev_entries)
+end
+
+Base.lastindex(book::AddressBook) = read_lock(book) do table
+    lastindex(table.entries)
+end
+
+iterate(book::AddressBook, state=1) = try
+    (book[state], state + 1)
+catch ex
+    ex isa BoundsError || rethrow()
+
+    nothing
+end
+
+function write_lock(fn::Function, book::AddressBook)
     retry = 4096
 
     lock(book.write_lock)
     try
         flop = 2 - book.flips[] % 2
-        i = lastindex(book.live[flop].entries) + 1
 
-        @assert i < typemax(UInt32) "Can't add actor, no local addresses left"
         @assert book.live[flop].readers[] == 0 "Previous flip should have drained readers"
-        push!(book.live[flop].entries, a)
+
+        fn(book.live[flop])
 
         flop = 2 - (atomic_inc!(book.flips) + 1) % 2
 
-        while retry > 0
-            book.live[flop].readers[] < 1 && break
+        while book.live[flop].readers[] > 0
+            @assert (retry -= 1) > 0 "Waited a long time to drain readers"
             retry -= 1
         end
 
-        retry > 0 || error("Gave up while waiting for readers to drain!")
-
-        push!(book.live[flop].entries, a)
-
-        Id(UInt32(i))
+        fn(book.live[flop])
     finally
         unlock(book.write_lock)
     end
 end
 
-function Base.setindex!(book::AddressBook, a::Union{Actor, Nothing}, id::Id)
-    retry = 4096
+Base.push!(book::AddressBook, a::Actor) = write_lock(book) do table
+    i = lastindex(table.entries) + 1
 
-    lock(book.write_lock)
-    try
-        flop = 2 - book.flips[] % 2
-        old_a = book.live[flop].entries[id.inner]
+    @assert i < typemax(UInt32) "Can't add actor, no local addresses left"
 
-        @assert book.live[flop].readers[] == 0 "Previous flip should have drained readers"
-        book.live[flop].entries[id.inner] = a
+    push!(table.entries, a)
 
-        flop = 2 - (atomic_inc!(book.flips) + 1) % 2
+    # For some reason get!() was behaving like get()
+    rev_entries = get(Set, table.rev_entries, a)
+    push!(rev_entries, UInt32(i))
+    table.rev_entries[a] = rev_entries
 
-        while retry > 0
-            book.live[flop].readers[] < 1 && break
-            retry -= 1
-        end
+    Id(UInt32(i))
+end
 
-        if retry < 0
-            book.live[flop % 2 + 1].entries[id.inner] = old_a
-            error("Gave up while waiting for readers to drain!")
-        end
+Base.setindex!(book::AddressBook, ::Nothing, id::Id) = write_lock(book) do table
+    old_a = table.entries[id.inner]
 
-        book.live[flop].entries[id.inner] = a
+    rentries = delete!(table.rev_entries[old_a], id.inner)
+    isempty(rentries) && delete!(table.rev_entries, old_a)
 
-        a
-    finally
-        unlock(book.write_lock)
-    end
+    table.entries[id.inner] = nothing
+end
+
+Base.setindex!(book::AddressBook, a::Actor, id::Id) = write_lock(book) do table
+    old_a = table.entries[id.inner]
+
+    rentries = delete!(table.rev_entries[old_a], id.inner)
+    isempty(rentries) && delete!(table.rev_entries, old_a)
+
+    table.entries[id.inner] = a
+
+    rev_entries = get(Set, table.rev_entries, a)
+    push!(rev_entries, id.inner)
+    table.rev_entries[a] = rev_entries
+
+    id
 end
