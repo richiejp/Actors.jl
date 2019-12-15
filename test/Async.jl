@@ -10,7 +10,9 @@ end
 
 struct AsyncUser end
 
-hear(s::Scene{AsyncUser}, ::Val{:go!}) = @try_async s error(ERROR_MSG)
+hear(s::Scene{AsyncUser}, ::Val{:go!}) = async(s) do s
+    error(ERROR_MSG)
+end
 
 struct AsyncPlay end
 
@@ -19,6 +21,9 @@ function hear(s::Scene{AsyncPlay}, ::Genesis!)
     user = enter!(s, AsyncUser(), mindy)
 
     say(s, user, Val(:go!))
+    async(s) do s
+        @test my(s) isa AsyncPlay
+    end
 end
 
 @testset LuvvyTestSet expect=1 "Async" begin

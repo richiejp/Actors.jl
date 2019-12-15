@@ -4,7 +4,7 @@ struct Pinger
     pings::UInt
 end
 
-struct Ponger
+mutable struct Ponger
     pongs::UInt
 end
 
@@ -26,9 +26,8 @@ hear(s::Scene{Pinger}, msg::Ping!) = let pings = my(s).pings
     say(s, stage(s), pong)
 end
 
-hear(s::Scene{Ponger}, msg::Ping!) = let pongs = my(s).pongs + 1
+hear(s::Scene{Ponger}, msg::Ping!) = let pongs = (my(s).pongs += 1)
     say(s, msg.re, Pong!(pongs))
-    my!(s, Ponger(pongs))
 end
 
 function hear(s::Scene{TypedMessages}, ::Genesis!)

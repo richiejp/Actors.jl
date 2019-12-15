@@ -67,30 +67,32 @@ catch ex
 end
 
 function write_lock(fn::Function, book::AddressBook)
-    retry = 4096
+    retries = 11
+    retry = 0
 
     lock(book.write_lock)
     try
-        flop = 2 - book.flips[] % 2
+        table = book.live[2 - book.flips[] % 2]
 
-        @assert book.live[flop].readers[] == 0 "Previous flip should have drained readers"
+        @assert table.readers[] == 0 "Previous flip should have drained readers"
 
-        fn(book.live[flop])
+        fn(table)
 
-        flop = 2 - (atomic_inc!(book.flips) + 1) % 2
+        table = book.live[2 - (atomic_inc!(book.flips) + 1) % 2]
 
-        while book.live[flop].readers[] > 0
-            @assert (retry -= 1) > 0 "Waited a long time to drain readers"
-            retry -= 1
+        while table.readers[] > 0
+            @assert retry < retries "Waited a long time to drain readers: $(table.readers[])"
+            sleep(2^retry * 0.0001)
+            retry += 1
         end
 
-        fn(book.live[flop])
+        fn(table)
     finally
         unlock(book.write_lock)
     end
 end
 
-Base.push!(book::AddressBook, a::Actor) = write_lock(book) do table
+Base.push!(book::AddressBook, a::Actor{S, M}) where {S, M} = write_lock(book) do table
     i = lastindex(table.entries) + 1
 
     @assert i < typemax(UInt32) "Can't add actor, no local addresses left"
@@ -102,7 +104,7 @@ Base.push!(book::AddressBook, a::Actor) = write_lock(book) do table
     push!(rev_entries, UInt32(i))
     table.rev_entries[a] = rev_entries
 
-    Id(UInt32(i))
+    Id{S, M}(UInt32(i))
 end
 
 Base.setindex!(book::AddressBook, ::Nothing, id::Id) = write_lock(book) do table

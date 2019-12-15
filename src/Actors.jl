@@ -10,7 +10,7 @@ export Stage, Troupe
 
 # Functions
 export stage, play!, enter!, leave!, ask, say, hear, me, my, my!
-export delegate, shout, minder, @say_info, @try_async
+export delegate, shout, minder, @say_info, async
 
 # Messages
 export Genesis!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
@@ -62,7 +62,7 @@ struct Id{S, M}
 end
 
 Base.:(==)(a::Id, b::Id) = a.inner == b.inner
-Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.i)
+Base.show(io::IO, id::Id{S}) where S = print(io, "$S@", id.inner)
 
 """The star of the show (but not really)
 
@@ -84,21 +84,27 @@ violations.
 It is rare to set `M`, but if it is set then it should include at least
 [`Leave!`](@ref).
 """
-mutable struct Actor{S, M}
+struct Actor{S, M}
     "How the Actor recieves messages, see [`listen!`](@ref)"
     inbox::Channel{M}
     "An arbitrary value which is usually thought of as the actor"
     state::S
-    "The Task this actor runs/ran in"
-    task::Union{Task, Nothing}
     "The `Id` of another actor which manages and supports this actor"
     minder::Id
+    "The Task this actor runs/ran in"
+    task::Union{Task, Nothing}
     "The cannonical `Id` of this `Actor`"
     me::Id{S, M}
+
+    Actor(inbox::Channel{M}, state::S, minder) where {S, M} =
+        new{S, M}(inbox, state, minder, nothing)
+    Actor(inbox::Channel{M}, state::S, minder, task, me) where {S, M} =
+        new{S, M}(inbox, state, minder, task, me)
 end
 
 "Create an Actor with the given state and minder"
-Actor{M}(data, minder) where M = Actor(Channel{M}(420), data, nothing, minder)
+Actor{M}(state, task, minder, me) where M =
+    Actor(Channel{M}(420), state, task, minder, me)
 
 include("addressing.jl")
 
@@ -126,25 +132,16 @@ type or allowing messages to be forwarded to the Play actor.
 """
 mutable struct Stage <: AbsStage
     "All the `Actor`s in the play"
-    actors::Set{Actor}
-    ids::AddressBook
+    actors::AddressBook
     "Grace period timer before force leaving"
     time_to_leave::Union{Timer, Nothing}
     "User defined play `Actor`"
     play::Id
 
-    "Create a new [`Stage`](@ref) with `play` state (not `Id`)"
-    function Stage(play)
-        st = new(Set{Id}(), AddressBook(), nothing)
-        id = Id{Stage}(UInt32(0))
-        a = Actor{Any}(st, id)
-        a.me = id
-
-        put!(actor.inbox, PreGenesis!(play))
-
-        a
-    end
+    Stage() = new(AddressBook(), nothing)
 end
+
+abstract type AbsScene{S, M} end
 
 """The context of message processing
 
@@ -160,16 +157,48 @@ to change.
 - `M` The message types accepted by the current `Actor`, usually `Any`.
 
 """
-struct Scene{S, M}
+struct Scene{S, M} <: AbsScene{S, M}
     "The current [`Actor`](@ref)"
     subject::Actor{S, M}
     "The [`Stage`](@ref)"
-    stage::Stage
+    stage::Actor{Stage}
 end
 
-scene_checks(s::Scene) = let a = s.subject
+struct AsyncScene{S, M} <: AbsScene{S, M}
+    s::Scene{S, M}
+    task::Task
+end
+
+Base.show(io::IO, s::Scene{S}) where S = print(io, "Scene{$S}")
+Base.show(io::IO, s::AsyncScene{S}) where S = print(io, "AsyncScene{$S}")
+
+const WRONG_TASK =
+    "The given Scene or Actor is not associated with this task. You are either trying to access another Actor's state or have used @async (use @try_async)."
+
+subject(s::Scene) = let a = s.subject
     @assert a.task !== nothing "Actor is not playing"
-    @assert a.task === current_task() "Trying to get another actor's state"
+    @assert a.task === current_task() WRONG_TASK
+
+    a
+end
+
+function subject(s::AsyncScene)
+    @assert s.task === current_task() WRONG_TASK
+
+    s.s.subject
+end
+
+stage_ref(s::Scene) = let a = s.subject
+    @assert a.task !== nothing "Actor is not playing"
+    @assert a.task === current_task() WRONG_TASK
+
+    s.stage
+end
+
+function stage_ref(s::AsyncScene) s.s.stage
+    @assert s.task === current_task() WRONG_TASK
+
+    s.s.stage
 end
 
 """Safely get the current [`Actor`](@ref)'s state
@@ -177,41 +206,22 @@ end
 Usually the user passes the [`Scene`](@ref) to this and gets the executing
 [`Actor`](@ref)'s state in return.
 """
-function my(s::Scene)
-    scene_checks(s)
-    s.subject.state
-end
-
-"""Set the current [`Actor`](@ref)'s state
-
-The inverse of [`my`](@ref); it is currently useful when the state type is
-immutable.
-
-!!! note
-
-    In the future, if messages are handled in parallel, then this could signal
-    that the next message may start to be processed.
-"""
-function my!(s::Scene, state)
-    scene_checks(s)
-    s.subject.state = state
-end
+my(s::AbsScene) = subject(s).state
 
 """Get the inbox of an [`Actor`](@ref)
 
 Useful when overriding functions such as [`listen!`](@ref) or
 [`leave!`](@ref). Otherwise it is quite unusual for the user to call
-this.
-"""
-function inbox(s::Scene, a::Id)
-    scene_checks(s)
-    s.stage.book[a].inbox
-end
+this. You should use [`say`](@ref) and [`ask`](@ref) to send messages.
 
-function inbox(s::Scene)
-    scene_checks(s)
-    s.subject.inbox
-end
+The `inbox` is how an `Actor` recieves messages. In a local system the sender
+directly places a message into the `inbox`. Currently inboxes are implemented
+with a Julia `Channel` which can be safely accessed by multiple threads,
+however it is generally expected that you don't `pop!` messages from another
+actor's inbox unless that actor is dead.
+"""
+inbox(s::AbsScene, a::Id) = stage_ref(s).state.actors[a].inbox
+inbox(s::AbsScene) = subject(s).inbox
 
 """Get the address of an [`Actor`](@ref)'s minder
 
@@ -219,24 +229,25 @@ When called on the [`Scene`](@ref) it will get the current Actor's minder. If
 called on an [`Id`](@ref) it will get the minder of the Actor pointed to by
 the address.
 
+!!! warning
+
+    It is generally not thread-safe to change `Actor.minder`. However you can
+    re-assign a minder's [`Id`](@ref) to another actor.
+
 See [`AbsMinder`](@ref).
-
 """
-minder(s::Scene, a::Id)::Id
-
-"""Set the [`Actor`](@ref)'s minder
-
-Inverse of [`minder`](@ref).
-"""
-minder!(a::Id, m::Id)::Id = my_ref(a)[].minder = m
+minder(s::AbsScene, a::Id)::Id = stage_ref(s).state.actors[a].minder
+minder(s::AbsScene) = subject(s).minder
 
 "Get the address ([`Id`](@ref)) of the current [`Actor`](@ref)"
-me(s::Scene) = s.subject
+me(s::AbsScene) = subject(s).me
 
 "Get the address ([`Id`](@ref)) of the [`Stage`](@ref)"
-stage(s::Scene) = s.stage
-minder(s::Scene) = minder(me(s))
-minder!(s::Scene, m::Id) = minder!(me(s), m)
+function stage(s::AbsScene)
+    subject(s)
+
+    Id{Stage}(UInt32(0))
+end
 
 """Send a message asynchronously
 
@@ -249,12 +260,12 @@ types.
 
 This doesn't expect a response from `to`. For that see [`ask`](@ref).
 """
-say(s::Scene, to::Id, msg) = if to.ref === nothing
-    error("$to appears to be a remote actor; use shout instead")
-else
-    @debug "$(stage(s))/$(me(s)) send to $to" msg
-    put!(inbox(to), msg)
+function say(s::AbsScene, to::Id, msg)
+    @debug "$s send" to msg
+    put!(inbox(s, to), msg)
 end
+
+say(s::AbsScene, ::Id{Stage}, msg) = put!(stage_ref(s).inbox, msg)
 
 """Handle a received message
 
@@ -272,7 +283,7 @@ If `hear` returns a value it will most likely be ignored (unless you override
 [`listen!`](@ref)). If you need to respond to a message then use [`say`](@ref)
 or [`ask`](@ref).
 """
-hear(s::Scene{<:AbsStage}, msg) = say(s, my(s).play, msg)
+hear(s::AbsScene{<:AbsStage}, msg) = say(s, my(s).play, msg)
 
 """Take messages from the [`inbox`](@ref) and process them
 
@@ -326,31 +337,35 @@ If you wish to exit immediately then throw an exception.
 
 Also see [`Leave!`](@ref).
 """
-leave!(s::Scene) = close(inbox(s))
+leave!(s::AbsScene) = close(inbox(s))
 function leave!(s::Scene{<:AbsStage})
-    actors = my(s).actors
-
-    for a in actors
-        try
-            put!(inbox(a), Leave!())
-        catch ex
-            ex isa InvalidStateException || rethrow()
+    write_lock(my(s).actors) do table
+        for a in keys(table.rev_entries)
+            try
+                put!(a.inbox, Leave!())
+            catch ex
+                ex isa InvalidStateException || rethrow()
+            end
         end
     end
 
     my(s).time_to_leave = timer = Timer(3)
+    inb = inbox(s)
     @async begin
         wait(timer)
-        close(inbox(s))
+        close(inb)
         @debug "$s Exit grace period over"
 
-        for a in actors
-            @debug "$a took too long to leave, forcibly closing inbox..."
-            close(inbox(a))
-            try
-                wait(a.ref[].task)
-            catch ex
-                @debug "$a Errored" ex
+        write_lock(my(s).actors) do table
+            for a in keys(table.rev_entries)
+                @debug "$a took too long to leave, forcibly closing inbox..."
+                close(a.inbox)
+
+                try
+                    isnothing(a.task) || wait(a.task)
+                catch ex
+                    @debug "$a Errored" ex
+                end
             end
         end
     end
@@ -365,10 +380,14 @@ to avoid using it. See [`enter!`](@ref) and [`play!`](@ref).
 Note that this is not necessary for getting OS "environment variables", which
 are typically shared amongst threads.
 """
-capture_environment(::Id) = nothing
+capture_environment(id) = nothing
 
-play!(play) = let a = Stage(play)
-    play!(Scene(a, a.state), capture_environment(a.me))
+play!(play) = let id = Id{Stage}(UInt32(0))
+    a = Actor(Channel{Any}(1024), Stage(), id, current_task(), id)
+
+    put!(a.inbox, PreGenesis!(play))
+
+    play!(Scene(a, a), capture_environment(id))
 end
 
 """Ran before [`listen!`](@ref)
@@ -407,12 +426,6 @@ you feel the need to override any of these, then you should solve the problem
 with [`AbsMinder`](@ref) or more message passing instead.
 """
 play!(s::Scene, env) = try
-    let a = s.subject.ref[]
-        @assert a.task === nothing "Actor is already playing"
-        a.task = current_task()
-        a.task.sticky = true
-    end
-
     prologue!(s, env)
     listen!(s)
     epilogue!(s, env)
@@ -446,15 +459,7 @@ function dieing_breath!(s::Scene, ex, env)
     @debug "$(me(s)) Died" ex
     say(s, minder(s), Died!(me(s), s.subject))
 end
-
-"Create an address [`Id`](@ref) for an [`Actor`](@ref) and add it to the [`Stage`](@ref)"
-function register!(s::Scene{<:AbsStage}, a::Actor)::Id
-    stage = my(s)
-
-    push!(stage.actors, a)
-
-    a.me = push!(stage.book, a)
-end
+dieing_breath!(s::Scene{<:AbsStage}, ex, env) = leave!(s)
 
 "Create a new Task, Thread or similar primitive"
 function fork(fn::Function)
@@ -463,21 +468,38 @@ function fork(fn::Function)
     schedule(task)
 end
 
-enter!(s::Scene, actor_state::S) where S = enter!(s, actor_state, Any)
-enter!(s::Scene, actor_state::S, ::Type{M}) where {S, M} =
+enter!(s::AbsScene, actor_state::S) where S = enter!(s, actor_state, Any)
+enter!(s::AbsScene, actor_state::S, ::Type{M}) where {S, M} =
     enter!(s, actor_state, minder(s), M)
-enter!(s::Scene, actor_state::S, minder::Id) where S =
+enter!(s::AbsScene, actor_state::S, minder::Id) where S =
     enter!(s, actor_state, minder, Any)
-enter!(s::Scene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
-    enter!(s, Actor{M}(actor_state, minder))
+enter!(s::AbsScene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
+    enter!(s, Actor(Channel{M}(512), actor_state, minder))
 
-"Add a new [`Actor`](@ref) to the [`Stage`](@ref)/Play and return its [`Id`](@ref)"
-function enter!(s::Scene, a::Actor{S, M}) where {S, M}
-    id = register!(s, a)
-    st = stage(s)
+"""Add a new [`Actor`](@ref) to the [`Stage`](@ref)/Play and return its [`Id`](@ref)
+
+!!! note
+
+    The `Actor` struct `a` is recreated by the new `Actor` so you can not use
+    it to do a reverse lookup of the `Id`.
+
+"""
+function enter!(s::AbsScene, a::Actor{S, M}) where {S, M}
+    st = stage_ref(s)
+    id = push!(st.state.actors, a)
     env = capture_environment(id)
 
-    fork(() -> play!(Scene(a, st), env))
+    @debug "$s forking" a
+    fork() do
+        try
+            a = Actor(a.inbox, a.state, a.minder, current_task(), id)
+            st.state.actors[id] = a
+            play!(Scene(a, st), env)
+        catch ex
+            @debug "Actor died" s a ex
+            rethrow()
+        end
+    end
 
     id
 end
@@ -496,7 +518,7 @@ from an old `ask` request or it was sent for some other reason. One way to
 avoid this is to [`delegate`](@ref) the `ask` request, or the entire
 operation, to a [`Stooge`](@ref) which will have a new address.
 """
-function ask(s::Scene, a::Id, favor, ::Type{R}) where R
+function ask(s::AbsScene, a::Id, favor, ::Type{R}) where R
     me(s) == a && error("Asking oneself results in deadlock")
     say(s, a, favor)
 
@@ -525,10 +547,10 @@ struct PreGenesis!{T}
 end
 
 function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
-    logger = enter!(s, LoggerActor(stdout, me(s)))
-    minder!(s, enter!(s, Actor{Any}(PassiveMinder(logger), me(s))))
+    logger = enter!(s, Logger(stdout), me(s), LoggerMsgs)
+    minder = enter!(s, PassiveMinder(logger), me(s))
 
-    play = my(s).play = enter!(s, msg.play)
+    play = my(s).play = enter!(s, msg.play, minder)
     say(s, play, Genesis!())
 end
 
@@ -541,9 +563,10 @@ struct Left!
     who::Id
 end
 
-function hear(s::Scene{Stage}, msg::Left!)
-    wait(msg.who.ref[].task)
-    delete!(my(s).actors, msg.who)
+hear(s::Scene{Stage}, msg::Left!) = let as = my(s).actors
+    wait(as[msg.who].task)
+
+    as[msg.who] = nothing
 end
 
 "Informs that an [`Actor`](@ref) died"
@@ -584,8 +607,16 @@ hear(s::Scene{<:Logger}, msg::LogDied!) = try
     printstyled(io, "Error: "; bold=true, color=Base.error_color())
     printstyled(io, msg.header; color=Base.error_color())
     println(io)
+
     task = msg.died.corpse.task
-    showerror(io, task.exception, task.backtrace)
+    if isnothing(task)
+        println(io, "Actor task is nothing; actor was not started?")
+    elseif isnothing(task.exception)
+        println(io, "Actor task has no exception? $(task)")
+    else
+        showerror(io, task.exception, task.backtrace)
+    end
+
     flush(io)
 catch ex
     @debug "Arhhgg; Logger died while trying to do its basic duty" ex
@@ -627,7 +658,6 @@ end
 
 const LogMsgs = Union{LogInfo!, LogDied!}
 const LoggerMsgs = Union{LogMsgs, Leave!}
-LoggerActor(io::IO, minder::Id) = Actor{LoggerMsgs}(Logger(io), minder)
 
 """An [`Actor`](@ref) which looks after other `Actors`'s
 
@@ -643,6 +673,7 @@ logger(s::Scene{<:AbsMinder}) = logger(my(s))
 hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, logger(s), msg)
 hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
 hear(s::Scene{<:AbsMinder}, msg::Died!) = try
+    Base._wait(msg.corpse.task)
     say(s, logger(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
     say(s, stage(s), msg)
 catch ex
@@ -683,9 +714,9 @@ some action in parallel.
     Do not use variables captured from the surrounding scope, pass them as
     `args...`. The `args` may be copied to avoid concurrency violations.
 """
-delegate(action::Function, s::Scene, args...) =
+delegate(action::Function, s::AbsScene, args...) =
     enter!(s, Stooge(action, args))
-delegate(action::Function, s::Scene, minder::Id, args...) =
+delegate(action::Function, s::AbsScene, minder::Id, args...) =
     enter!(s, Stooge(action, args), minder)
 
 """A group of [`Actor`](@ref)'s
@@ -717,7 +748,7 @@ struct Shout!{T}
 end
 
 "Broadcast a message to a [`Troupe`](@ref)"
-shout(s::Scene, troupe::Id{Troupe}, msg) = say(s, troupe, Shout!(msg))
+shout(s::AbsScene, troupe::Id{Troupe}, msg) = say(s, troupe, Shout!(msg))
 
 hear(s::Scene{Troupe}, shout::Shout!) = for a in my(s).as
     say(s, a, shout.msg)
@@ -738,17 +769,15 @@ check for errors. If an exception is thrown, the `Actor` will send
 [`AsyncFail!`](@ref) to itself. By default this will cause
 `TaskFailedException` to be thrown thus killing the `Actor`.
 """
-macro try_async(s, expr)
-    expr = quote
-        @async try
-            $expr
-        catch
-            say($s, me($s), AsyncFail!(current_task()))
-            rethrow()
-        end
-    end
+async(fn, scene) = @async begin
+    s = AsyncScene(scene, current_task())
 
-    esc(expr)
+    try
+        fn(s)
+    catch ex
+        say(s, me(s), AsyncFail!(s.task))
+        rethrow()
+    end
 end
 
 end # module

@@ -1,6 +1,6 @@
 struct StackPlay end
 
-struct Stack{T}
+mutable struct Stack{T}
     content::Union{T, Nothing}
     link::Union{Id{Stack{T}}, Nothing}
     forward::Bool
@@ -15,18 +15,17 @@ hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{T, Id}}) where T =
         (type, m) = msg
 
         if type === :push!
-            if isnothing(my(s).content)
-                my!(s, Stack(m, nothing, false))
-            else
-                my!(s, Stack(m, enter!(s, my(s)), false))
+            if !isnothing(my(s).content)
+                my(s).link = enter!(s, Stack(my(s).content, nothing, false))
             end
+
+            my(s).content = m
         elseif type === :pop! && !isnothing(my(s).content)
             say(s, m, my(s).content)
+            my(s).content = nothing
 
-            if isnothing(my(s).link)
-                my!(s, Stack{T}())
-            else
-                my!(s, Stack{T}(nothing, my(s).link, true))
+            if !isnothing(my(s).link)
+                my(s).forward = true
             end
         else
             error("Can't handle $type")

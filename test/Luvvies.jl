@@ -1,11 +1,11 @@
 # Popularity begets popularity
-struct Darling
+mutable struct Darling
     name::String
     pop::Int
     play::Id
 end
 
-struct LuvviesPlay
+mutable struct LuvviesPlay
     brian::Id{Darling}
     nigel::Id{Darling}
 
@@ -37,22 +37,16 @@ hear(s::Scene{Darling}, msg::WhoLoves!) = if me(s) != msg.re
     end
 end
 
-function hear(s::Scene{Darling}, ::Val{:i_love_you!})
-    state = my(s)
-    state = my!(s, Darling(state.name, state.pop + 1, state.play))
-
-    say(s, state.play, DeclarePop!(state.pop, me(s)))
-end
+hear(s::Scene{Darling}, ::Val{:i_love_you!}) =
+    say(s, my(s).play, DeclarePop!((my(s).pop += 1), me(s)))
 
 function hear(s::Scene{LuvviesPlay}, ::Genesis!)
-    nigel = enter!(s, Darling("Nigel", 0, me(s)))
-    brian = enter!(s, Darling("Brian", 1, me(s)))
+    nigel = my(s).nigel = enter!(s, Darling("Nigel", 0, me(s)))
+    brian = my(s).brian = enter!(s, Darling("Brian", 1, me(s)))
     troupe = enter!(s, Troupe(nigel, brian))
 
     shout(s, troupe, WhoLoves!(nigel))
     shout(s, troupe, WhoLoves!(brian))
-
-    my!(s, LuvviesPlay(brian, nigel))
 end
 
 function hear(s::Scene{LuvviesPlay}, msg::DeclarePop!)

@@ -13,7 +13,10 @@ mutable struct LuvvyTestSet <: AbstractTestSet
 end
 
 hear(s::Scene{LuvvyTestSet}, res::Result) = push!(my(s).results, res)
-record(ts::LuvvyTestSet, res::Result) = put!(Actors.inbox(ts.myself), res)
+
+record(ts::LuvvyTestSet, res::Result) =
+    say(task_local_storage(:scene), ts.myself, res)
+
 finish(ts::LuvvyTestSet) = let dts = DefaultTestSet(ts.desc)
     wrong_length = ts.expect > 0 && ts.expect != length(ts.results)
 
@@ -39,11 +42,16 @@ struct TestEnvironment
 end
 
 # Get our test set from the main task's (The Stage's task) local storage
-Actors.capture_environment(::Id{Stage}) = TestEnvironment(Test.get_testset())
+Actors.capture_environment(::Id) = let ts = Test.get_testset()
+    ts isa LuvvyTestSet ? TestEnvironment(ts) : nothing
+end
 
 # Inject the test set actor into our play when the Stage starts
 Actors.prologue!(s::Scene{Stage}, env::TestEnvironment) =
     env.ts.myself = enter!(s, env.ts)
 
 # Inject the test set into a new actor's Task local storage
-Actors.prologue!(s::Scene, env::TestEnvironment) = Test.push_testset(env.ts)
+function Actors.prologue!(s::Scene, env::TestEnvironment)
+    task_local_storage(:scene, s)
+    Test.push_testset(env.ts)
+end

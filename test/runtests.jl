@@ -12,6 +12,7 @@ else
     @warn "Only testing with one thread"
 end
 
+include("TestSet.jl")
 include("addressing.jl")
 
 # Sanity check without using our custom TestSet
@@ -48,7 +49,6 @@ end
 
 include("Logger.jl")
 
-include("TestSet.jl")
 struct TestSetTest end
 
 function hear(s::Scene{TestSetTest}, ::Genesis!)
