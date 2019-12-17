@@ -9,7 +9,7 @@ export Id, Scene
 export Stage, Troupe
 
 # Functions
-export stage, play!, enter!, leave!, ask, say, hear, me, my, my!
+export stage, play!, enter!, leave!, forward!, ask, say, hear, me, my, my!
 export delegate, shout, minder, @say_info, async
 
 # Messages
@@ -338,6 +338,7 @@ If you wish to exit immediately then throw an exception.
 Also see [`Leave!`](@ref).
 """
 leave!(s::AbsScene) = close(inbox(s))
+
 function leave!(s::Scene{<:AbsStage})
     write_lock(my(s).actors) do table
         for a in keys(table.rev_entries)
@@ -369,6 +370,18 @@ function leave!(s::Scene{<:AbsStage})
             end
         end
     end
+end
+
+function forward!(s::AbsScene, to::Id)
+    as = stage_ref(s).state.actors
+    ids = as[subject(s)]
+    to_a = as[to]
+
+    for id in ids
+        as[Id(id)] = to_a
+    end
+
+    leave!(s)
 end
 
 """Used to capture variables from the parent thread/task
