@@ -23,14 +23,6 @@ $DOCSTRING
 $TYPEDFIELDS
 """
 
-@template (FUNCTIONS, METHODS, MACROS) = """
-$DOCSTRING
-
-### Signatures
-
-$TYPEDSIGNATURES
-"""
-
 """The Address of an [`Actor`](@ref)
 
 This is a safe reference to an [`Actor`](@ref). It is most commonly used to
