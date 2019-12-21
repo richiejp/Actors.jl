@@ -381,7 +381,15 @@ function forward!(s::AbsScene, to::Id)
         as[Id(id)] = to_a
     end
 
+    task = async(s) do s
+        for msg in inbox(s)
+            say(s, to, msg)
+        end
+    end
+
+    yield()
     leave!(s)
+    wait(task)
 end
 
 """Used to capture variables from the parent thread/task
