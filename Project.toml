@@ -1,7 +1,7 @@
 name = "Actors"
 uuid = "18269d71-cc38-4e02-b8c8-1db30113a6dd"
 authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
