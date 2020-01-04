@@ -9,8 +9,8 @@ export Id, Scene
 export Stage, Troupe
 
 # Functions
-export stage, play!, enter!, leave!, forward!, ask, say, hear, me, my, my!
-export delegate, shout, minder, @say_info, async
+export stage, play!, enter!, leave!, forward!, ask, say, hear, me, my
+export delegate, shout, minder, @say_info, async, interact!, local_addresses
 
 # Messages
 export Genesis!, Leave!, LogInfo!, Died!, Left!, AsyncFail!
@@ -187,7 +187,7 @@ stage_ref(s::Scene) = let a = s.subject
     s.stage
 end
 
-function stage_ref(s::AsyncScene) s.s.stage
+function stage_ref(s::AsyncScene)
     @assert s.task === current_task() WRONG_TASK
 
     s.s.stage
@@ -792,5 +792,7 @@ async(fn, scene) = @async begin
         rethrow()
     end
 end
+
+include("interactive.jl")
 
 end # module

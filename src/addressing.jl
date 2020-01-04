@@ -42,8 +42,9 @@ function read_lock(fn::Function, book::AddressBook)
     end
 end
 
-Base.getindex(book::AddressBook, id::Id) = read_lock(book) do table
-    table.entries[id.inner]
+Base.getindex(book::AddressBook, id::Id) = getindex(book, id.inner)
+Base.getindex(book::AddressBook, id::Integer) = read_lock(book) do table
+    table.entries[id]
 end
 
 Base.getindex(book::AddressBook, a::Actor) = read_lock(book) do table
@@ -58,12 +59,16 @@ Base.lastindex(book::AddressBook) = read_lock(book) do table
     lastindex(table.entries)
 end
 
-iterate(book::AddressBook, state=1) = try
+Base.iterate(book::AddressBook, state=1) = try
     (book[state], state + 1)
 catch ex
     ex isa BoundsError || rethrow()
 
     nothing
+end
+
+Base.length(book::AddressBook) = read_lock(book) do table
+    length(table.entries)
 end
 
 function write_lock(fn::Function, book::AddressBook)
