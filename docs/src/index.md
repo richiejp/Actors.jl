@@ -91,7 +91,7 @@ using Actors
 import Actors: hear
 
 function hear(s::Scene{Int}, ::Genesis!)
-	my!(s, 1)
+	my(s) = 1
 
 	@say_info s "My state is $(my(s))"
 
@@ -112,7 +112,7 @@ struct StopwatchPlay
 end
 
 function hear(s::Scene{StopwatchPlay}, ::Genesis!)
-	my!(s, StopwatchPlay(1))
+	my(s) = StopwatchPlay(1)
 
 	@say_info s "My state is $(my(s).i)"
 
@@ -138,7 +138,7 @@ system and current actor. It is recommended to always call this variable `s`,
 so that you have the option of using unhygenic macros which implicitly use
 this information.
 
-The [`my!`](@ref) accessor method allows us to update the actor
+The [`my`](@ref) accessor method allows us to get or set the actor
 state. `StopwatchPlay` is immutable, so we can't do `my(s).i = 1`.
 
 !!! note
