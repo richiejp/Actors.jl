@@ -139,18 +139,103 @@ so that you have the option of using unhygenic macros which implicitly use
 this information.
 
 The [`my`](@ref) accessor method allows us to get or set the actor
-state. `StopwatchPlay` is immutable, so we can't do `my(s).i = 1`.
+state.
 
 !!! note
 
     Because `StopwatchPlay` only contains a plain bit type `Int`, it is therefor a
-    plain bit type itself. If we make it immutable then it becomes something quite
+    plain bit type itself. If we make it mutable then it becomes something quite
     different. As a general rule it is better for performance and safety if
     your data is made up of immutable types, in particular plain bit types. Especially
     if this data is passed between actors allowing you to accidentally access
-    the safe reference in two different threads.
+    the reference in two different threads.
 
 The [`@say_info`](@ref) macro sends a message to an automatically created
 actor which logs messages to stdout. Finally we send [`Leave!`](@ref) to the
 [`Stage`](@ref) actor which then propagates this to all other actors and
 shutsdown the actor system.
+
+Now let's actually create a stopwatch...
+
+```@example
+using Actors
+import Actors: hear
+
+struct Start! end
+struct Stop! end
+struct Status!
+	re::Id
+end
+
+struct StopwatchPlay end
+
+mutable struct Watch
+	start::Union{UInt64, Nothing}
+	stop::Union{UInt64, Nothing}
+end
+
+hear(s::Scene{Watch}, ::Start!) = my(s).start = time_ns()
+hear(s::Scene{Watch}, ::Stop!) = my(s).stop = time_ns()
+hear(s::Scene{Watch}, msg::Status!) = let w = my(s)
+	say(s, msg.re, w.stop - w.start)
+end
+
+function hear(s::Scene{StopwatchPlay}, ::Genesis!)
+	watch = enter!(s, Watch(nothing, nothing))
+	say(s, watch, Start!())
+	say(s, watch, Stop!())
+	time = ask(s, watch, Status!(me(s)), UInt64)
+
+	@say_info s "It took $(time)ns to process Start and Stop"
+
+	say(s, stage(s), Leave!())
+end
+
+play!(StopwatchPlay())
+```
+
+Much new stuff has been added here; firstly the `Start!`, `Stop!` and `Status!`
+message types. These are just plain Julia types, but by convention a `!` is
+added at the end to distiguish dedicated message types from everything else.
+
+The start and stop messages don't contain any data, their type just decides
+which [`hear`](@ref) method is called. Which I hope displays the power of Julia's
+multi-methods.
+
+!!! note
+
+    You may override [`Actors.listen!`](@ref) instead to process
+    messages. This allows you to avoid the multiple dispatch on
+    `hear`.
+
+The status message contains a return address, which by convention is given the
+name `re`. Messages often don't evoke a response or, if they do, it is not
+directed at the originator of a message, so we must specify the address a
+response is sent to explicitly.
+
+Next, a definition for a new actor has been added (or rather a new
+[`Actors.Actor`](@ref)'s state). This is `Watch` which contains the start and stop
+times. Smaller implementation(s) could be achieved by removing the stop time
+and merging `Status!` with `Stop!`.
+
+Then there are the message handlers, see that we use the [`Id`](@ref) from
+`Status!.re` in the status handler to send the time back to the requestor (or
+some other arbitrary actor for that matter).
+
+Finally there are a couple of new functions being used in the `Genesis!`
+handler. The first is `enter!` which allows us to create a new actor. It
+returns the new actor's address (the type is called `Id` to avoid typing and
+anger pedants) which we can use to send it messages.
+
+After starting and stopping the message we use [`ask`](@ref) to get the value
+of the recorded time.
+
+!!! warning
+
+    There are some pretty big problems with this implementation of a
+    stopwatch. Importantly, there is no guaranteed order for message
+    delivery. In practice the messages are unlikely to get switched around in
+    a local system, but you can't rely on this. So the messages should contain
+    some sequence information if this is important. Of course it is also
+    fairly pointless creating a stopwatch with nanosecond precision which is
+    using message passing, but never mind that.
