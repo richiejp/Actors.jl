@@ -9,7 +9,7 @@ export Id, Scene
 export Stage, Troupe
 
 # Functions
-export stage, play!, enter!, leave!, forward!, ask, say, hear, me, my
+export stage, play!, enter!, leave!, forward!, expect, ask, say, hear, me, my
 export delegate, shout, minder, @say_info, async, interact!, local_addresses
 
 # Messages
@@ -517,24 +517,21 @@ function enter!(s::AbsScene, a::Actor{S, M}) where {S, M}
     id
 end
 
-"""Like [`say`](@ref), but wait for a response of a given type `R`
+"""Wait for a message of type `R` and return it
 
 This will block waiting for a message of the right type. It will cause the
 [`Actor`](@ref) to become 'insensitive', meaning that all other messages will
 be buffered while waiting.
 
 When a message of the right type is recieved, then the buffered messages will
-be put back in the [`inbox`](@ref) and the message is returned.
+be put back in the [`inbox`](@ref) and the matching message is returned.
 
 In theory this could accept the wrong message if the type matches, but it was
-from an old `ask` request or it was sent for some other reason. One way to
-avoid this is to [`delegate`](@ref) the `ask` request, or the entire
+from an old request or it was sent for some other reason. One way to
+avoid this is to [`delegate`](@ref) the [`ask`](@ref) request, or the entire
 operation, to a [`Stooge`](@ref) which will have a new address.
 """
-function ask(s::AbsScene, a::Id, favor, ::Type{R}) where R
-    me(s) == a && error("Asking oneself results in deadlock")
-    say(s, a, favor)
-
+function expect(s::AbsScene, ::Type{R}) where R
     inb = inbox(s)
     msg = take!(inb)
     msg isa R && return msg
@@ -549,6 +546,16 @@ function ask(s::AbsScene, a::Id, favor, ::Type{R}) where R
     foreach(m -> put!(inb, m), scratch)
 
     msg
+end
+
+"""Like [`say`](@ref), but wait for a response of a given type `R`
+
+Simply calls `say` then [`expect`](@ref).
+"""
+function ask(s::AbsScene, a::Id, favor, ::Type{R}) where R
+    me(s) == a && error("Asking oneself results in deadlock")
+    say(s, a, favor)
+    expect(s, R)
 end
 
 # Messages
