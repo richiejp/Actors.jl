@@ -60,4 +60,7 @@ import Actors: Actor, AddressBook
     @test book.live[1].entries == book.live[2].entries
     @test book.live[1].readers[] == 0
     @test book.live[2].readers[] == 0
+
+    book[Id(1)] = nothing
+    @test_throws KeyError book[Id(1)]
 end

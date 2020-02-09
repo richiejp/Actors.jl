@@ -35,7 +35,7 @@ function hear(s::Scene{A}, msg::HelloWorld!) where A
 end
 
 function hear(s::Scene{HelloWorld}, ::Genesis!)
-    julia = enter!(s, Julia())
+    julia = invite!(s, Julia())
     say(s, julia, HelloWorld!(my(s).chnl))
 end
 
@@ -47,6 +47,7 @@ end
     close(p.chnl)
 end
 
+include("Minders.jl")
 include("Logger.jl")
 
 struct TestSetTest end

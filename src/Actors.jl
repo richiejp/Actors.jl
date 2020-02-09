@@ -9,7 +9,7 @@ export Id, Scene
 export Stage, Troupe
 
 # Functions
-export stage, play!, enter!, leave!, forward!, expect, ask, say, hear, me, my
+export stage, play!, enter!, invite!, leave!, forward!, expect, ask, say, hear, me, my
 export delegate, shout, minder, @say_info, async, interact!, local_addresses
 
 # Messages
@@ -259,6 +259,25 @@ end
 
 say(s::AbsScene, ::Id{Stage}, msg) = put!(stage_ref(s).inbox, msg)
 
+"""Like [`say`](@ref), but *less likely* to throw an exception if `to` is
+dead. This is commonly useful when an unexpected error has occurred and you
+want to perform some cleanup without knowing which actors are still
+alive. Under normal operation you should expect other actors to be alive if
+you are sending them a message.
+
+!!! note
+
+    If, for example, `to` exceeds the highest known ID in the local
+    [`Stage`](@ref) then this will still throw a `BoundsError`. This is to
+    help prevent silent errors.
+
+"""
+try_say(s::AbsScene, to::Id, msg) = try
+    say(s, to, msg)
+catch ex
+    ex isa Union{InvalidStateException, KeyError} || rethrow()
+end
+
 """Handle a received message
 
 Usually called by [`listen!`](@ref) to handle a message taken from the
@@ -342,14 +361,15 @@ function leave!(s::Scene{<:AbsStage})
         end
     end
 
-    my(s).time_to_leave = timer = Timer(3)
     inb = inbox(s)
+    as = my(s).actors
+    my(s).time_to_leave = timer = Timer(3)
     @async begin
         wait(timer)
         close(inb)
         @debug "$s Exit grace period over"
 
-        write_lock(my(s).actors) do table
+        write_lock(as) do table
             for a in keys(table.rev_entries)
                 @debug "$a took too long to leave, forcibly closing inbox..."
                 close(a.inbox)
@@ -403,7 +423,7 @@ play!(play) = let id = Id{Stage}(UInt32(0))
     play!(Scene(a, a), capture_environment(id))
 end
 
-"""Ran before [`listen!`](@ref)
+"""Ran before [`listen!`](@ref) and in [`async`](@ref)
 
 By default does nothing, but can be overriden to mess with an
 [`Actor`](@ref)'s internals. It is passed `env` which is taken by
@@ -411,7 +431,7 @@ By default does nothing, but can be overriden to mess with an
 
 See [`enter!`](@ref) and [`play!`](@ref).
 """
-function prologue!(s::Scene, env) end
+function prologue!(s::AbsScene, env) end
 
 """Start the 'Actor System' or a single [`Actor`](@ref)
 
@@ -457,8 +477,9 @@ internals.It is passed `env` which is taken by [`capture_environment`](@ref).
 
 See [`enter!`](@ref) and [`play!`](@ref).
 """
+epilogue!(::AbsScene, env) = nothing
 epilogue!(s::Scene, env) = say(s, minder(s), Left!(me(s)))
-epilogue!(s::Scene{<:AbsStage}, env) = nothing
+epilogue!(::Scene{<:AbsStage}, env) = nothing
 
 """Run if an exception is thrown in [`play!`](@ref)
 
@@ -489,7 +510,9 @@ enter!(s::AbsScene, actor_state::S, minder::Id) where S =
 enter!(s::AbsScene, actor_state::S, minder::Id, ::Type{M}) where {S, M} =
     enter!(s, Actor(Channel{M}(512), actor_state, minder))
 
-"""Add a new [`Actor`](@ref) to the [`Stage`](@ref)/Play and return its [`Id`](@ref)
+"""Add a new [`Actor`](@ref) to the [`Stage`](@ref)/Play and return its
+[`Id`](@ref). This is usually called by a [`AbsMinder`](@ref)'s
+[`Invite!`](@ref) handler.
 
 !!! note
 
@@ -566,11 +589,12 @@ struct PreGenesis!{T}
     play::T
 end
 
-function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
+function hear(s::Scene{<:AbsStage}, msg::PreGenesis!{S}) where S
     logger = enter!(s, Logger(stdout), me(s), LoggerMsgs)
-    minder = enter!(s, PassiveMinder(logger), me(s))
+    passive_minder = enter!(s, PassiveMinder(logger), me(s))
+    tree_minder = enter!(s, TreeMinder(passive_minder), passive_minder)
 
-    play = my(s).play = enter!(s, msg.play, minder)
+    play = my(s).play = ask(s, tree_minder, Invite!(me(s), msg.play), Invited!{S}).who
     say(s, play, Genesis!())
 end
 
@@ -583,10 +607,10 @@ struct Left!
     who::Id
 end
 
-hear(s::Scene{Stage}, msg::Left!) = let as = my(s).actors
-    wait(as[msg.who].task)
+function hear(s::Scene{Stage}, msg::Left!)
+    my(s).actors[msg.who] = nothing
 
-    as[msg.who] = nothing
+    isnothing(my(s).time_to_leave) && leave!(s)
 end
 
 "Informs that an [`Actor`](@ref) died"
@@ -602,9 +626,8 @@ hear(s::Scene{<:AbsStage}, msg::Died!) = leave!(s)
 "Tell an [`Actor`](@ref) to [`leave!`](@ref)"
 struct Leave! end
 
-hear(s::Scene, msg::Leave!) = leave!(s)
-# Prevents ambiguity with hear(s::Scene{Stage}, msg)
-hear(s::Scene{<:AbsStage}, msg::Leave!) = leave!(s)
+hear(s::AbsScene, msg::Leave!) = leave!(s)
+hear(s::AbsScene{<:AbsStage}, msg::Leave!) = say(s, my(s).play, msg)
 
 # Actors (Other than Stage)
 
@@ -679,6 +702,29 @@ end
 const LogMsgs = Union{LogInfo!, LogDied!}
 const LoggerMsgs = Union{LogMsgs, Leave!}
 
+"""Request an actor be created with the given `state`. This is usually sent to
+an actor's minder which uses [`enter!`](@ref) to create the new actor.
+
+It is expected that minders (subtypes of [`AbsMinder`](@ref)) implement this
+unless they are only intended for use with a special set of actors.
+"""
+struct Invite!{S}
+    re::Id
+    state::S
+end
+
+"A response to [`Invite!`](@ref)"
+struct Invited!{S}
+    who::Id{S}
+end
+
+"""Request an actor be created with the given `state` and return the new
+[`Id`](@ref). This is just a wrapper for sending [`Invite!`](@ref) to the
+current actor's [`minder`](@ref) and waiting for a response.
+"""
+invite!(s::Scene, state::S) where S =
+    ask(s, minder(s), Invite!(me(s), state), Invited!{S}).who
+
 """An [`Actor`](@ref) which looks after other `Actors`'s
 
 Every `Actor` is assigned a [`minder`](@ref) which it can call upong to
@@ -688,24 +734,108 @@ take action to replace a failed actor.
 """
 abstract type AbsMinder end
 
-logger(s::Scene{<:AbsMinder}) = logger(my(s))
-
-hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, logger(s), msg)
-hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
-hear(s::Scene{<:AbsMinder}, msg::Died!) = try
-    Base._wait(msg.corpse.task)
-    say(s, logger(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
-    say(s, stage(s), msg)
-catch ex
-    @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
-    rethrow()
+hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, minder(s), msg)
+hear(s::Scene{<:AbsMinder}, msg::Left!) = let as = stage_ref(s).state.actors
+    wait(as[msg.who].task)
+    as[msg.who] = nothing
+    leave!(s)
 end
+hear(s::Scene{<:AbsMinder}, msg::Died!) = say(s, minder(s), msg)
 
 struct PassiveMinder{L <: Id} <: AbsMinder
     logger::Union{L, Nothing}
 end
 
-logger(m::PassiveMinder) = m.logger
+hear(s::Scene{<:PassiveMinder}, msg::Invited!) = nothing
+hear(s::Scene{<:PassiveMinder}, msg::LogMsgs) = say(s, my(s).logger, msg)
+hear(s::Scene{<:PassiveMinder}, msg::Died!) = try
+    Base._wait(msg.corpse.task)
+    say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+    leave!(s)
+catch ex
+    @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
+    rethrow()
+end
+
+"""Organises actors into a hieracy or tree structure. This is used as the
+default [`AbsMinder`](@ref) for the play.
+
+When an actor with this minder uses [`invite!`](@ref) the returned actor will
+be a child of the current actor (the current actor being the parent). An actor
+may have many children, but only a single parent.
+
+* If a child actor dies then the parent recieves [`Died!`](@ref). By default
+  actors don't know how to handle this so they will also die. (In any case the
+  death will be logged).
+
+* If a parent leaves or dies, then its children are also asked to
+  [`Leave!`](@ref).
+
+If you don't wish for an actor to die when one of its children do, then define
+[`hear`](@ref) for the [`Died!`](@ref) message.
+"""
+mutable struct TreeMinder <: AbsMinder
+    root::Id
+    minded::Union{Id, Nothing}
+    children::Set{Id}
+end
+
+TreeMinder(root) = TreeMinder(root, nothing, Set())
+
+hear(s::Scene{TreeMinder}, msg::Invite!{S}) where S = let m = my(s)
+    if m.minded === nothing
+        m.minded = enter!(s, msg.state, me(s))
+        say(s, msg.re, Invited!(m.minded))
+    else
+        child_m = enter!(s, TreeMinder(m.root), me(s))
+        say(s, child_m, msg)
+        push!(m.children, child_m)
+    end
+end
+
+hear(s::Scene{TreeMinder}, msg::Leave!) = if isnothing(my(s).minded)
+    leave!(s)
+else
+    try_say(s, my(s).minded, msg)
+end
+
+stop_children(s::Scene, m::TreeMinder) = for child in m.children
+    try_say(s, child, Leave!())
+end
+
+hear(s::Scene{TreeMinder}, msg::Left!) = let m = my(s)
+    if msg.who == m.minded
+        stop_children(s, m)
+
+        as = stage_ref(s).state.actors
+        wait(as[msg.who].task)
+        as[msg.who] = nothing
+        m.minded = nothing
+    else
+        @assert msg.who in m.children "$(msg.who) not in $(m.children)"
+        delete!(m.children, msg.who)
+    end
+
+    isnothing(m.minded) && isempty(m.children) && leave!(s)
+end
+
+hear(s::Scene{TreeMinder}, msg::Died!) = let m = my(s)
+    if msg.who in m.children
+        say(s, m.root, msg)
+    elseif msg.who == m.minded
+        stop_children(s, m)
+        say(s, minder(s), msg)
+
+        Base._wait(msg.corpse.task)
+        stage_ref(s).state.actors[msg.who] = nothing
+        m.minded = nothing
+
+        say(s, m.root, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+        isempty(m.children) && leave!(s)
+    else
+        isnothing(m.minded) || say(s, m.minded, msg)
+    end
+end
 
 """A temporary [`Actor`](@ref) which performs one `action` then leaves
 
@@ -735,7 +865,7 @@ some action in parallel.
     `args...`. The `args` may be copied to avoid concurrency violations.
 """
 delegate(action::Function, s::AbsScene, args...) =
-    enter!(s, Stooge(action, args))
+    invite!(s, Stooge(action, args))
 delegate(action::Function, s::AbsScene, minder::Id, args...) =
     enter!(s, Stooge(action, args), minder)
 
@@ -789,14 +919,20 @@ check for errors. If an exception is thrown, the `Actor` will send
 [`AsyncFail!`](@ref) to itself. By default this will cause
 `TaskFailedException` to be thrown thus killing the `Actor`.
 """
-async(fn, scene) = @async begin
-    s = AsyncScene(scene, current_task())
+function async(fn, sc::Scene)
+    env = capture_environment(me(sc))
 
-    try
-        fn(s)
-    catch ex
-        say(s, me(s), AsyncFail!(s.task))
-        rethrow()
+    @async begin
+        s = AsyncScene(sc, current_task())
+
+        try
+            prologue!(s, env)
+            fn(s)
+            epilogue!(s, env)
+        catch ex
+            say(s, me(s), AsyncFail!(s.task))
+            rethrow()
+        end
     end
 end
 

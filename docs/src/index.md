@@ -91,11 +91,9 @@ using Actors
 import Actors: hear
 
 function hear(s::Scene{Int}, ::Genesis!)
-	my(s) = 1
-
 	@say_info s "My state is $(my(s))"
 
-	say(s, stage(s), Leave!())
+	leave!(s)
 end
 
 play!(0)
@@ -107,16 +105,16 @@ OK, this is a bit silly, lets do it again with a dedicated play type.
 using Actors
 import Actors: hear
 
-struct StopwatchPlay
+mutable struct StopwatchPlay
 	i::Int
 end
 
 function hear(s::Scene{StopwatchPlay}, ::Genesis!)
-	my(s) = StopwatchPlay(1)
+	my(s).i = 1
 
 	@say_info s "My state is $(my(s).i)"
 
-	say(s, stage(s), Leave!())
+	leave!(s)
 end
 
 play!(StopwatchPlay(0))
@@ -140,15 +138,6 @@ this information.
 
 The [`my`](@ref) accessor method allows us to get or set the actor
 state.
-
-!!! note
-
-    Because `StopwatchPlay` only contains a plain bit type `Int`, it is therefor a
-    plain bit type itself. If we make it mutable then it becomes something quite
-    different. As a general rule it is better for performance and safety if
-    your data is made up of immutable types, in particular plain bit types. Especially
-    if this data is passed between actors allowing you to accidentally access
-    the reference in two different threads.
 
 The [`@say_info`](@ref) macro sends a message to an automatically created
 actor which logs messages to stdout. Finally we send [`Leave!`](@ref) to the
@@ -181,14 +170,14 @@ hear(s::Scene{Watch}, msg::Status!) = let w = my(s)
 end
 
 function hear(s::Scene{StopwatchPlay}, ::Genesis!)
-	watch = enter!(s, Watch(nothing, nothing))
+	watch = invite!(s, Watch(nothing, nothing))
 	say(s, watch, Start!())
 	say(s, watch, Stop!())
 	time = ask(s, watch, Status!(me(s)), UInt64)
 
 	@say_info s "It took $(time)ns to process Start and Stop"
 
-	say(s, stage(s), Leave!())
+	leave!(s)
 end
 
 play!(StopwatchPlay())
@@ -223,7 +212,7 @@ Then there are the message handlers, see that we use the [`Id`](@ref) from
 some other arbitrary actor for that matter).
 
 Finally there are a couple of new functions being used in the `Genesis!`
-handler. The first is `enter!` which allows us to create a new actor. It
+handler. The first is `invite!` which allows us to create a new actor. It
 returns the new actor's address (the type is called `Id` to avoid typing and
 anger pedants) which we can use to send it messages.
 

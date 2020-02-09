@@ -12,7 +12,7 @@ function hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{Id, T}}) where T
 
     if type === :push!
         if !isnothing(my(s).content)
-            my(s).link = enter!(s, Stack(my(s).content, nothing))
+            my(s).link = invite!(s, Stack(my(s).content, nothing))
         end
 
         my(s).content = m
@@ -27,7 +27,7 @@ function hear(s::Scene{Stack{T}}, msg::Tuple{Symbol, Union{Id, T}}) where T
 end
 
 function hear(s::Scene{StackPlay}, ::Genesis!)
-    stack = enter!(s, Stack{Symbol}())
+    stack = invite!(s, Stack{Symbol}())
 
     say(s, stack, (:push!, :a))
     @test ask(s, stack, (:pop!, me(s)), Symbol) == :a
@@ -36,7 +36,7 @@ function hear(s::Scene{StackPlay}, ::Genesis!)
     @test ask(s, stack, (:pop!, me(s)), Symbol) == :b
 
 
-    stack = enter!(s, Stack{Int}())
+    stack = invite!(s, Stack{Int}())
 
     for i in 1:5
         say(s, stack, (:push!, i))
@@ -48,7 +48,7 @@ function hear(s::Scene{StackPlay}, ::Genesis!)
     @test ask(s, stack, (:pop!, me(s)), Int) == 6
     @test ask(s, stack, (:pop!, me(s)), Int) == 4
 
-    say(s, stage(s), Leave!())
+    leave!(s)
 end
 
 @testset LuvvyTestSet "Actors Stack" begin

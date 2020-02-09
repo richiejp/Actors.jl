@@ -38,18 +38,25 @@ struct HelloWorld! end
 
 "Handle messages of type HelloWorld! for all actors"
 function hear(s::Scene{A}, ::HelloWorld!) where A
-	println("Hello, World! I am $(A)!")
+	# Tell the Logger actor (started automatically) to print a message
+	@say_info s "Hello, World! I am $(A)!"
 
-	# Asking the Stage to leave stops the play
+	# Tell the 'Stage' to leave; Stage forwards Leave! to the Play which then
+	# asks its children to leave.
 	say(s, stage(s), Leave!())
 end
 
-"Handle Genesis! which is sent to our play actor on startup"
-hear(s::Scene{HelloWorld}, ::Genesis!) =
-	# Enter Julia into the play and send her the HelloWorld! message
-	say(s, enter!(s, Julia()), HelloWorld!())
+"Handle Genesis! which is sent to our play actor on startup by the Stage"
+function hear(s::Scene{HelloWorld}, ::Genesis!)
+	# Invite Julia into the play; she will be a child of the HelloWorld actor.
+	julia = invite!(s, Julia())
 
-# Start our play and block while waiting for it to finish
+	# Say HellowWorld! to Julia
+	say(s, julia, HelloWorld!())
+end
+
+# Start our 'play' (the actor system) and block while waiting for it to
+# finish.
 play!(HelloWorld())
 ```
 
@@ -57,11 +64,19 @@ This should print "Hello, World! I am Julia!". The `A` in `Scene{A}` takes the
 type of the Actor (technically the Actor's state) in the Scene.
 
 Note that this isn't the simplest possible use of Actors.jl. For that we could
-just print "Hello, World!" in the `Genesis!` handler or use `delegate` to
-spawn a temporary actor (A `Stooge`) without defining it.
+just print "Hello, World!" in the `Genesis!` handler.
 
 See `test/runtest.jl` for more examples. Also see the
 [documentation](https://palethorpe.gitlab.io/Actors.jl/).
+
+## Installation
+
+Actors is available from the Julia registry however this is likely to be
+lagging far behind development. So use:
+
+```
+pkg> add https://gitlab.com/Palethorpe/Actors.jl.git#master
+```
 
 ## More spiel
 

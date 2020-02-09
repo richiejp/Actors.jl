@@ -2,7 +2,6 @@
 mutable struct Darling
     name::String
     pop::Int
-    play::Id
 end
 
 mutable struct LuvviesPlay
@@ -38,12 +37,12 @@ hear(s::Scene{Darling}, msg::WhoLoves!) = if me(s) != msg.re
 end
 
 hear(s::Scene{Darling}, ::Val{:i_love_you!}) =
-    say(s, my(s).play, DeclarePop!((my(s).pop += 1), me(s)))
+    say(s, stage(s), DeclarePop!((my(s).pop += 1), me(s)))
 
 function hear(s::Scene{LuvviesPlay}, ::Genesis!)
-    nigel = my(s).nigel = enter!(s, Darling("Nigel", 0, me(s)))
-    brian = my(s).brian = enter!(s, Darling("Brian", 1, me(s)))
-    troupe = enter!(s, Troupe(nigel, brian))
+    nigel = my(s).nigel = invite!(s, Darling("Nigel", 0))
+    brian = my(s).brian = invite!(s, Darling("Brian", 1))
+    troupe = invite!(s, Troupe(nigel, brian))
 
     shout(s, troupe, WhoLoves!(nigel))
     shout(s, troupe, WhoLoves!(brian))
@@ -54,7 +53,7 @@ function hear(s::Scene{LuvviesPlay}, msg::DeclarePop!)
     @test msg.pop == 2
     @test ask(s, my(s).nigel, HowPopularAreYou!(me(s)), Int) == 0
 
-    say(s, stage(s), Leave!())
+    leave!(s)
 end
 
 @testset LuvvyTestSet expect=3 "luvvies sim" begin
