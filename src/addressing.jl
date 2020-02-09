@@ -43,8 +43,14 @@ function read_lock(fn::Function, book::AddressBook)
 end
 
 Base.getindex(book::AddressBook, id::Id) = getindex(book, id.inner)
-Base.getindex(book::AddressBook, id::Integer) = read_lock(book) do table
-    table.entries[id]
+function Base.getindex(book::AddressBook, id::Integer)
+    a = read_lock(book) do table
+        table.entries[id]
+    end
+
+    a === nothing && throw(KeyError(id))
+
+    a
 end
 
 Base.getindex(book::AddressBook, a::Actor) = read_lock(book) do table

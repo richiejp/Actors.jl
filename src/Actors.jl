@@ -259,6 +259,25 @@ end
 
 say(s::AbsScene, ::Id{Stage}, msg) = put!(stage_ref(s).inbox, msg)
 
+"""Like [`say`](@ref), but *less likely* to throw an exception if `to` is
+dead. This is commonly useful when an unexpected error has occurred and you
+want to perform some cleanup without knowing which actors are still
+alive. Under normal operation you should expect other actors to be alive if
+you are sending them a message.
+
+!!! note
+
+    If, for example, `to` exceeds the highest known ID in the local
+    [`Stage`](@ref) then this will still throw a `BoundsError`. This is to
+    help prevent silent errors.
+
+"""
+try_say(s::AbsScene, to::Id, msg) = try
+    say(s, to, msg)
+catch ex
+    ex isa Union{InvalidStateException, KeyError} || rethrow()
+end
+
 """Handle a received message
 
 Usually called by [`listen!`](@ref) to handle a message taken from the
@@ -568,9 +587,10 @@ end
 
 function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
     logger = enter!(s, Logger(stdout), me(s), LoggerMsgs)
-    minder = enter!(s, PassiveMinder(logger), me(s))
+    passive_minder = enter!(s, PassiveMinder(logger), me(s))
+    tree_minder = enter!(s, TreeMinder(passive_minder))
 
-    play = my(s).play = enter!(s, msg.play, minder)
+    play = my(s).play = ask(s, tree_minder, Invite!(me(s), msg.play), Id)
     say(s, play, Genesis!())
 end
 
@@ -679,6 +699,23 @@ end
 const LogMsgs = Union{LogInfo!, LogDied!}
 const LoggerMsgs = Union{LogMsgs, Leave!}
 
+"""Request an actor be created with the given `state`. This is usually sent to
+an actor's minder which uses [`enter!`](@ref) to create the new actor.
+
+It is expected that minders (subtypes of [`AbsMinder`](@ref)) implement this
+unless they are only intended for use with a special set of actors.
+"""
+struct Invite!{S}
+    re::Id
+    state::S
+end
+
+"""Request an actor be created with the given `state` and return the new
+[`Id`](@ref). This is just a wrapper for sending [`Invite!`](@ref) to the
+current actor's [`minder`](@ref) and waiting for a response.
+"""
+invite!(s::Scene, state) = ask(s, minder(s), Invite!(me(s), state), Id)
+
 """An [`Actor`](@ref) which looks after other `Actors`'s
 
 Every `Actor` is assigned a [`minder`](@ref) which it can call upong to
@@ -688,24 +725,79 @@ take action to replace a failed actor.
 """
 abstract type AbsMinder end
 
-logger(s::Scene{<:AbsMinder}) = logger(my(s))
-
-hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, logger(s), msg)
+hear(s::Scene{<:AbsMinder}, msg::Invite!) = say(s, minder(s), msg)
+hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, minder(s), msg)
 hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
-hear(s::Scene{<:AbsMinder}, msg::Died!) = try
-    Base._wait(msg.corpse.task)
-    say(s, logger(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
-    say(s, stage(s), msg)
-catch ex
-    @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
-    rethrow()
-end
+hear(s::Scene{<:AbsMinder}, msg::Died!) = say(s, minder(s), msg)
 
 struct PassiveMinder{L <: Id} <: AbsMinder
     logger::Union{L, Nothing}
 end
 
-logger(m::PassiveMinder) = m.logger
+hear(s::Scene{<:PassiveMinder}, msg::LogMsgs) = say(s, my(s).logger, msg)
+hear(s::Scene{<:PassiveMinder}, msg::Died!) = try
+    Base._wait(msg.corpse.task)
+    say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+    say(s, minder(s), msg)
+catch ex
+    @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
+    rethrow()
+end
+
+mutable struct TreeMinder <: AbsMinder
+    parent::Id
+    minded::Union{Id, Nothing}
+    children::Set{Id}
+end
+
+TreeMinder(parent) = TreeMinder(parent, nothing, Set())
+
+hear(s::Scene{TreeMinder}, msg::Invite!) = let minder = my(s)
+    if minder.minded === nothing
+        minder.minded = enter!(s, msg.state, me(s))
+        say(s, msg.re, minder.minded)
+    else
+        child_minder = enter!(s, TreeMinder(me(s)))
+        say(s, child_minder, msg)
+    end
+end
+
+stop_children(minder::TreeMinder) = for child in minder.children
+    try_say(s, child, Leave!())
+end
+
+hear(s::Scene{TreeMinder}, msg::Left!) = let minder = my(s)
+    if msg.who == minder.minded
+        stop_children(minder)
+        try_say(s, minder.parent, msg)
+
+        as = stage_ref(s).state.actors
+        wait(as[msg.who].task)
+        as[msg.who] = nothing
+
+        leave!()
+    else
+        delete!(minder.children, msg.who)
+    end
+end
+
+hear(s::Scene{TreeMinder}, msg::Died!) = let minder = my(s)
+    if msg.who in minder.children
+        say(s, minder.minded, msg)
+        delete!(minder.children, msg.who)
+    elseif msg.who == minder.minded
+        stop_children(minder)
+        try_say(s, my(s).parent, msg)
+
+        Base._wait(msg.corpse.task)
+        stage_ref(s).state.actors[msg.who] = nothing
+        say(s, minder(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+
+        leave!()
+    else
+        say(s, minder(s), msg)
+    end
+end
 
 """A temporary [`Actor`](@ref) which performs one `action` then leaves
 
