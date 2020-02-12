@@ -4,7 +4,7 @@ end
 
 struct LoggerPlayMinder <: Actors.AbsMinder end
 
-hear(s::Scene{LoggerPlayMinder}, msg::Died!) = say(s, stage(s), Leave!())
+hear(s::Scene{LoggerPlayMinder}, ::Left!) = say(s, stage(s), Leave!())
 
 function hear(s::Scene{LoggerPlay}, ::Genesis!)
     log = invite!(s, Actors.Logger(my(s).io))

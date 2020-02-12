@@ -51,7 +51,7 @@ Actors.prologue!(s::Scene{Stage}, env::TestEnvironment) =
     env.ts.myself = enter!(s, env.ts)
 
 # Inject the test set into a new actor's Task local storage
-function Actors.prologue!(s::Scene, env::TestEnvironment)
+function Actors.prologue!(s::Actors.AbsScene{S}, env::TestEnvironment) where S
     task_local_storage(:scene, s)
     Test.push_testset(env.ts)
 end

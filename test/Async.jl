@@ -1,4 +1,4 @@
-const ERROR_MSG = "Error Message"
+const ERROR_MSG = "Pretend Error"
 
 struct AsyncUser end
 

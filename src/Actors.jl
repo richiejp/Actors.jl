@@ -351,8 +351,6 @@ Also see [`Leave!`](@ref).
 leave!(s::AbsScene) = close(inbox(s))
 
 function leave!(s::Scene{<:AbsStage})
-    my(s).time_to_leave = timer = Timer(3)
-
     write_lock(my(s).actors) do table
         for a in keys(table.rev_entries)
             try
@@ -365,6 +363,7 @@ function leave!(s::Scene{<:AbsStage})
 
     inb = inbox(s)
     as = my(s).actors
+    my(s).time_to_leave = timer = Timer(3)
     @async begin
         wait(timer)
         close(inb)
@@ -424,7 +423,7 @@ play!(play) = let id = Id{Stage}(UInt32(0))
     play!(Scene(a, a), capture_environment(id))
 end
 
-"""Ran before [`listen!`](@ref)
+"""Ran before [`listen!`](@ref) and in [`async`](@ref)
 
 By default does nothing, but can be overriden to mess with an
 [`Actor`](@ref)'s internals. It is passed `env` which is taken by
@@ -432,7 +431,7 @@ By default does nothing, but can be overriden to mess with an
 
 See [`enter!`](@ref) and [`play!`](@ref).
 """
-function prologue!(s::Scene, env) end
+function prologue!(s::AbsScene, env) end
 
 """Start the 'Actor System' or a single [`Actor`](@ref)
 
@@ -478,8 +477,9 @@ internals.It is passed `env` which is taken by [`capture_environment`](@ref).
 
 See [`enter!`](@ref) and [`play!`](@ref).
 """
+epilogue!(::AbsScene, env) = nothing
 epilogue!(s::Scene, env) = say(s, minder(s), Left!(me(s)))
-epilogue!(s::Scene{<:AbsStage}, env) = nothing
+epilogue!(::Scene{<:AbsStage}, env) = nothing
 
 """Run if an exception is thrown in [`play!`](@ref)
 
@@ -605,10 +605,10 @@ struct Left!
     who::Id
 end
 
-hear(s::Scene{Stage}, msg::Left!) = let as = my(s).actors
-    as[msg.who] = nothing
+function hear(s::Scene{Stage}, msg::Left!)
+    my(s).actors[msg.who] = nothing
 
-    msg.who == my(s).play && leave!()
+    isnothing(my(s).time_to_leave) && leave!(s)
 end
 
 "Informs that an [`Actor`](@ref) died"
@@ -624,7 +624,8 @@ hear(s::Scene{<:AbsStage}, msg::Died!) = leave!(s)
 "Tell an [`Actor`](@ref) to [`leave!`](@ref)"
 struct Leave! end
 
-hear(s::Scene, msg::Leave!) = leave!(s)
+hear(s::AbsScene, msg::Leave!) = leave!(s)
+hear(s::AbsScene{<:AbsStage}, msg::Leave!) = say(s, my(s).play, msg)
 
 # Actors (Other than Stage)
 
@@ -734,7 +735,7 @@ hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, minder(s), msg)
 hear(s::Scene{<:AbsMinder}, msg::Left!) = let as = stage_ref(s).state.actors
     wait(as[msg.who].task)
     as[msg.who] = nothing
-    leave!()
+    leave!(s)
 end
 hear(s::Scene{<:AbsMinder}, msg::Died!) = say(s, minder(s), msg)
 
@@ -747,7 +748,7 @@ hear(s::Scene{<:PassiveMinder}, msg::LogMsgs) = say(s, my(s).logger, msg)
 hear(s::Scene{<:PassiveMinder}, msg::Died!) = try
     Base._wait(msg.corpse.task)
     say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
-    leave!()
+    leave!(s)
 catch ex
     @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
     rethrow()
@@ -773,9 +774,9 @@ hear(s::Scene{TreeMinder}, msg::Invite!{S}) where S = let m = my(s)
 end
 
 hear(s::Scene{TreeMinder}, msg::Leave!) = if isnothing(my(s).minded)
-    leave!()
+    leave!(s)
 else
-    say(s, my(s).minded, msg)
+    try_say(s, my(s).minded, msg)
 end
 
 stop_children(s::Scene, m::TreeMinder) = for child in m.children
@@ -791,7 +792,7 @@ hear(s::Scene{TreeMinder}, msg::Left!) = let m = my(s)
         as[msg.who] = nothing
         m.minded = nothing
     else
-        @assert msg.who in m.children
+        @assert msg.who in m.children "$(msg.who) not in $(m.children)"
         delete!(m.children, msg.who)
     end
 
@@ -898,14 +899,20 @@ check for errors. If an exception is thrown, the `Actor` will send
 [`AsyncFail!`](@ref) to itself. By default this will cause
 `TaskFailedException` to be thrown thus killing the `Actor`.
 """
-async(fn, scene) = @async begin
-    s = AsyncScene(scene, current_task())
+function async(fn, sc::Scene)
+    env = capture_environment(me(sc))
 
-    try
-        fn(s)
-    catch ex
-        say(s, me(s), AsyncFail!(s.task))
-        rethrow()
+    @async begin
+        s = AsyncScene(sc, current_task())
+
+        try
+            prologue!(s, env)
+            fn(s)
+            epilogue!(s, env)
+        catch ex
+            say(s, me(s), AsyncFail!(s.task))
+            rethrow()
+        end
     end
 end
 

@@ -56,7 +56,7 @@ function hear(s::Scene{TypedMessages}, ::Genesis!)
 
     @debug "Typed message times" any_time union_time
 
-    say(s, stage(s), Leave!())
+    leave!(s)
 end
 
 @testset LuvvyTestSet "Typed Messages" begin
