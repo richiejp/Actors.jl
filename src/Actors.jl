@@ -9,7 +9,7 @@ export Id, Scene
 export Stage, Troupe
 
 # Functions
-export stage, play!, enter!, leave!, forward!, expect, ask, say, hear, me, my
+export stage, play!, enter!, invite!, leave!, forward!, expect, ask, say, hear, me, my
 export delegate, shout, minder, @say_info, async, interact!, local_addresses
 
 # Messages
@@ -351,6 +351,8 @@ Also see [`Leave!`](@ref).
 leave!(s::AbsScene) = close(inbox(s))
 
 function leave!(s::Scene{<:AbsStage})
+    my(s).time_to_leave = timer = Timer(3)
+
     write_lock(my(s).actors) do table
         for a in keys(table.rev_entries)
             try
@@ -361,14 +363,14 @@ function leave!(s::Scene{<:AbsStage})
         end
     end
 
-    my(s).time_to_leave = timer = Timer(3)
     inb = inbox(s)
+    as = my(s).actors
     @async begin
         wait(timer)
         close(inb)
         @debug "$s Exit grace period over"
 
-        write_lock(my(s).actors) do table
+        write_lock(as) do table
             for a in keys(table.rev_entries)
                 @debug "$a took too long to leave, forcibly closing inbox..."
                 close(a.inbox)
@@ -585,12 +587,12 @@ struct PreGenesis!{T}
     play::T
 end
 
-function hear(s::Scene{<:AbsStage}, msg::PreGenesis!)
+function hear(s::Scene{<:AbsStage}, msg::PreGenesis!{S}) where S
     logger = enter!(s, Logger(stdout), me(s), LoggerMsgs)
     passive_minder = enter!(s, PassiveMinder(logger), me(s))
-    tree_minder = enter!(s, TreeMinder(passive_minder))
+    tree_minder = enter!(s, TreeMinder(passive_minder), passive_minder)
 
-    play = my(s).play = ask(s, tree_minder, Invite!(me(s), msg.play), Id)
+    play = my(s).play = ask(s, tree_minder, Invite!(me(s), msg.play), Invited!{S}).who
     say(s, play, Genesis!())
 end
 
@@ -604,9 +606,9 @@ struct Left!
 end
 
 hear(s::Scene{Stage}, msg::Left!) = let as = my(s).actors
-    wait(as[msg.who].task)
-
     as[msg.who] = nothing
+
+    msg.who == my(s).play && leave!()
 end
 
 "Informs that an [`Actor`](@ref) died"
@@ -623,8 +625,6 @@ hear(s::Scene{<:AbsStage}, msg::Died!) = leave!(s)
 struct Leave! end
 
 hear(s::Scene, msg::Leave!) = leave!(s)
-# Prevents ambiguity with hear(s::Scene{Stage}, msg)
-hear(s::Scene{<:AbsStage}, msg::Leave!) = leave!(s)
 
 # Actors (Other than Stage)
 
@@ -710,11 +710,16 @@ struct Invite!{S}
     state::S
 end
 
+struct Invited!{S}
+    who::Id{S}
+end
+
 """Request an actor be created with the given `state` and return the new
 [`Id`](@ref). This is just a wrapper for sending [`Invite!`](@ref) to the
 current actor's [`minder`](@ref) and waiting for a response.
 """
-invite!(s::Scene, state) = ask(s, minder(s), Invite!(me(s), state), Id)
+invite!(s::Scene, state::S) where S =
+    ask(s, minder(s), Invite!(me(s), state), Invited!{S}).who
 
 """An [`Actor`](@ref) which looks after other `Actors`'s
 
@@ -725,77 +730,89 @@ take action to replace a failed actor.
 """
 abstract type AbsMinder end
 
-hear(s::Scene{<:AbsMinder}, msg::Invite!) = say(s, minder(s), msg)
 hear(s::Scene{<:AbsMinder}, msg::LogMsgs) = say(s, minder(s), msg)
-hear(s::Scene{<:AbsMinder}, msg::Left!) = nothing
+hear(s::Scene{<:AbsMinder}, msg::Left!) = let as = stage_ref(s).state.actors
+    wait(as[msg.who].task)
+    as[msg.who] = nothing
+    leave!()
+end
 hear(s::Scene{<:AbsMinder}, msg::Died!) = say(s, minder(s), msg)
 
 struct PassiveMinder{L <: Id} <: AbsMinder
     logger::Union{L, Nothing}
 end
 
+hear(s::Scene{<:PassiveMinder}, msg::Invited!) = nothing
 hear(s::Scene{<:PassiveMinder}, msg::LogMsgs) = say(s, my(s).logger, msg)
 hear(s::Scene{<:PassiveMinder}, msg::Died!) = try
     Base._wait(msg.corpse.task)
     say(s, my(s).logger, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
-    say(s, minder(s), msg)
+    leave!()
 catch ex
     @debug "Arrgg; $(typeof(my(s))) died while trying to do its basic duty" ex
     rethrow()
 end
 
 mutable struct TreeMinder <: AbsMinder
-    parent::Id
+    root::Id
     minded::Union{Id, Nothing}
     children::Set{Id}
 end
 
-TreeMinder(parent) = TreeMinder(parent, nothing, Set())
+TreeMinder(root) = TreeMinder(root, nothing, Set())
 
-hear(s::Scene{TreeMinder}, msg::Invite!) = let minder = my(s)
-    if minder.minded === nothing
-        minder.minded = enter!(s, msg.state, me(s))
-        say(s, msg.re, minder.minded)
+hear(s::Scene{TreeMinder}, msg::Invite!{S}) where S = let m = my(s)
+    if m.minded === nothing
+        m.minded = enter!(s, msg.state, me(s))
+        say(s, msg.re, Invited!(m.minded))
     else
-        child_minder = enter!(s, TreeMinder(me(s)))
-        say(s, child_minder, msg)
+        child_m = enter!(s, TreeMinder(m.root), me(s))
+        say(s, child_m, msg)
+        push!(m.children, child_m)
     end
 end
 
-stop_children(minder::TreeMinder) = for child in minder.children
+hear(s::Scene{TreeMinder}, msg::Leave!) = if isnothing(my(s).minded)
+    leave!()
+else
+    say(s, my(s).minded, msg)
+end
+
+stop_children(s::Scene, m::TreeMinder) = for child in m.children
     try_say(s, child, Leave!())
 end
 
-hear(s::Scene{TreeMinder}, msg::Left!) = let minder = my(s)
-    if msg.who == minder.minded
-        stop_children(minder)
-        try_say(s, minder.parent, msg)
+hear(s::Scene{TreeMinder}, msg::Left!) = let m = my(s)
+    if msg.who == m.minded
+        stop_children(s, m)
 
         as = stage_ref(s).state.actors
         wait(as[msg.who].task)
         as[msg.who] = nothing
-
-        leave!()
+        m.minded = nothing
     else
-        delete!(minder.children, msg.who)
+        @assert msg.who in m.children
+        delete!(m.children, msg.who)
     end
+
+    isnothing(m.minded) && isempty(m.children) && leave!(s)
 end
 
-hear(s::Scene{TreeMinder}, msg::Died!) = let minder = my(s)
-    if msg.who in minder.children
-        say(s, minder.minded, msg)
-        delete!(minder.children, msg.who)
-    elseif msg.who == minder.minded
-        stop_children(minder)
-        try_say(s, my(s).parent, msg)
+hear(s::Scene{TreeMinder}, msg::Died!) = let m = my(s)
+    if msg.who in m.children
+        say(s, m.root, msg)
+    elseif msg.who == m.minded
+        stop_children(s, m)
+        say(s, minder(s), msg)
 
         Base._wait(msg.corpse.task)
         stage_ref(s).state.actors[msg.who] = nothing
-        say(s, minder(s), LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+        m.minded = nothing
 
-        leave!()
+        say(s, m.root, LogDied!("$(me(s)): Actor $(msg.who) died!", msg))
+        isempty(m.children) && leave!(s)
     else
-        say(s, minder(s), msg)
+        isnothing(m.minded) || say(s, m.minded, msg)
     end
 end
 
@@ -827,7 +844,7 @@ some action in parallel.
     `args...`. The `args` may be copied to avoid concurrency violations.
 """
 delegate(action::Function, s::AbsScene, args...) =
-    enter!(s, Stooge(action, args))
+    invite!(s, Stooge(action, args))
 delegate(action::Function, s::AbsScene, minder::Id, args...) =
     enter!(s, Stooge(action, args), minder)
 

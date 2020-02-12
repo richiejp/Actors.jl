@@ -2,11 +2,16 @@ struct LoggerPlay
     io::IO
 end
 
-function hear(s::Scene{LoggerPlay}, ::Genesis!)
-    log = enter!(s, Actors.Logger(my(s).io), Actors.LoggerMsgs)
-    mindy = enter!(s, Actors.PassiveMinder(log))
+struct LoggerPlayMinder <: Actors.AbsMinder end
 
-    delegate(s, mindy) do s
+hear(s::Scene{LoggerPlayMinder}, msg::Died!) = say(s, stage(s), Leave!())
+
+function hear(s::Scene{LoggerPlay}, ::Genesis!)
+    log = invite!(s, Actors.Logger(my(s).io))
+    m1 = invite!(s, LoggerPlayMinder())
+    m2 = enter!(s, Actors.PassiveMinder(log), m1)
+
+    delegate(s, m2) do s
         @say_info s "Noise"
         error("Drama")
     end
