@@ -900,9 +900,12 @@ end
 "Broadcast a message to a [`Troupe`](@ref)"
 shout(s::AbsScene, troupe::Id{Troupe}, msg) = say(s, troupe, Shout!(msg))
 
-hear(s::Scene{Troupe}, shout::Shout!) = for a in my(s).as
-    say(s, a, shout.msg)
+"Broadcast a message to a plain vector of actors"
+shout(s::AbsScene, ids, msg) = for a in ids
+    say(s, a, msg)
 end
+
+hear(s::Scene{Troupe}, msg::Shout!) = shout(s, my(s).as, msg.msg)
 
 "Informs that an asynchronous `Task` failed"
 struct AsyncFail!
