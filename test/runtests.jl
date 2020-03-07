@@ -15,6 +15,7 @@ end
 include("TestSet.jl")
 include("addressing.jl")
 
+# Sanity check without using our custom TestSet
 "Our Play"
 struct HelloWorld
     chnl::Channel
@@ -38,6 +39,17 @@ function hear(s::Scene{HelloWorld}, ::Genesis!)
     say(s, julia, HelloWorld!(my(s).chnl))
 end
 
+@testset "Hello, World!" begin
+    p = HelloWorld(Channel(1))
+
+    play!(p)
+    @test take!(p.chnl) == "Hello, World! I am Julia!"
+    close(p.chnl)
+end
+
+include("Minders.jl")
+include("Logger.jl")
+
 struct TestSetTest end
 
 function hear(s::Scene{TestSetTest}, ::Genesis!)
@@ -47,26 +59,11 @@ function hear(s::Scene{TestSetTest}, ::Genesis!)
     say(s, stage(s), Leave!())
 end
 
-# Running the tests asynchronously without properly interleaving the results
-# creates messy output
-@sync begin
-    @async @testset "Hello, World!" begin
-        p = HelloWorld(Channel(1))
-
-        play!(p)
-        @test take!(p.chnl) == "Hello, World! I am Julia!"
-        close(p.chnl)
-    end
-
-    @async include("Minders.jl")
-    @async include("Logger.jl")
-
-    @async @testset LuvvyTestSet expect=1 "TestSet Test" begin
-        play!(TestSetTest())
-    end
-
-    @async include("Async.jl")
-    @async include("Luvvies.jl")
-    @async include("Stack.jl")
-    @async include("TypedMessages.jl")
+@testset LuvvyTestSet expect=1 "TestSet Test" begin
+    play!(TestSetTest())
 end
+
+include("Async.jl")
+include("Luvvies.jl")
+include("Stack.jl")
+include("TypedMessages.jl")
