@@ -185,6 +185,7 @@ websockets is a very compelling use case.
 
 ## Alternatives
 
+- [YAActL.jl](https://github.com/pbayer/YAActL.jl) Yet Another Actor Library!
 - Original [Actors.jl](https://github.com/oschulz/Actors.jl)
 
 ## References
