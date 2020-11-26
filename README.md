@@ -1,11 +1,13 @@
-# Actors.jl - An Actor Model Library for Julia
+# LuvvyActors - An Actor Model Library for Julia
 
-*This library is very much experimental as is Julia threading, so you can take
-my claims with some salt*
+*This is on hold indefinitely, see
+[https://github.com/JuliaActors](JuliaActors) and
+[https://github.com/Circo-dev](Circo)*
 
-Actors.jl helps you to write error resistant, highly parallel code. It
-encourages you to fully embrace the Actor model[^Actors], thus creating
-extremely distributed and robust applications.
+Actors.jl (now renamed again) helps you to write error resistant,
+highly parallel code. It encourages you to fully embrace the Actor
+model[^Actors], thus creating extremely distributed and robust
+applications.
 
 All else being equal, this library optimises for parallisation and resilience
 over single core performance or memory efficiency. This may be slower in the
@@ -16,9 +18,11 @@ in Julia itself. I doubt it will work Julia versions less than v1.3.
 
 ## Luvvy
 
-This library was called [Luvvy](https://gitlab.com/Palethorpe/luvvy), but was
-renamed to [Actors.jl](https://gitlab.com/Palethorpe/actors.jl). Luvvy may
-become something else which builds on Actors.jl.
+This library was called [Luvvy](https://gitlab.com/Palethorpe/luvvy),
+then was renamed to
+[Actors.jl](https://gitlab.com/Palethorpe/actors.jl) and now has been
+renamed to LuvvyActors because Actors.jl has become a generic Actor
+interface. Luvvy is now an experimental Actor based web framework.
 
 ## Hello, World!
 
@@ -185,7 +189,8 @@ websockets is a very compelling use case.
 
 ## Alternatives
 
-- [YAActL.jl](https://github.com/pbayer/YAActL.jl) Yet Another Actor Library!
+- [Circo](https://github.com/Circo-dev)
+- [YAActL.jl](https://github.com/JuliaActors/YAActL.jl) Yet Another Actor Library!
 - Original [Actors.jl](https://github.com/oschulz/Actors.jl)
 
 ## References
